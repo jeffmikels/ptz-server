@@ -1,10 +1,9 @@
 // MODULES
-const config = require('./config');
-
 const HID = require("node-hid");
-const ViscaControl = require("./visca");
 const http = require('http');
-const dgram = require('dgram');
+
+const config = require('./config');
+const ViscaControl = require("./visca");
 
 let SidewinderPP = require("./controllers/sidewinderpp");
 let Dualshock4 = require("./controllers/dualshock4");
@@ -15,9 +14,10 @@ visca.start();
 
 /* CONTROLLER HANDLER */
 let sw = new SidewinderPP(); // reports axes as signed values
+sw.onUpdate((data) => console.log(data));
 let ds4 = new Dualshock4();      // reports axes as unsigned 8 bit
 ds4.onUpdate((data) => {
-	// allows the local controller to send signals directly without vMix
+	console.log(data);
 });
 
 /* VISCA IP PASSTHROUGH */

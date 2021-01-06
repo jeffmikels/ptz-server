@@ -6,6 +6,7 @@ class Constants {
 
     // controller message categories (QQ from the spec)
     static MSGTYPE_COMMAND = 0x01;
+    static MSGTYPE_IF_CLEAR = 0x01;
     static MSGTYPE_INQUIRY = 0x09;
     static MSGTYPE_CANCEL = 0x20;      // low nibble identifies the command buffer to cancel
     static MSGTYPE_ADDRESS_SET = 0x30; // goes through all devices and then back to controller

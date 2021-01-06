@@ -1,3 +1,8 @@
+const udp = require('dgram');
+const { EventEmitter } = require('events');
+const { v4: uuid } = require('uuid');
+
+
 /*
 Creates a UDP server to receive VISCA over IP commands.
 
@@ -7,12 +12,6 @@ and to send camera replies back to the proper UDP clients.
 The Visca Controller should create one Server for each physical camera we want
 to expose to network control.
 */
-
-// MODULES
-const config = require('./config')
-const udp = require('dgram')
-const { EventEmitter } = require('events');
-
 class Server extends EventEmitter {
 
 	constructor(port = 50000) {
@@ -55,9 +54,49 @@ class Server extends EventEmitter {
 	}
 
 	write(packet) {
-		this.socket.write(packet);
+		this.socket.send(packet);
 	}
-
 }
 
-module.exports = { Server }
+// simply implements a visca transport over a udp socket
+class UDPTransport extends EventEmitter {
+	debug = false;
+
+	constructor(host = '', port = 50000) {
+		this.host = host;
+		this.port = port;
+		this.uuid = uuid();
+
+		// creating a client socket
+		this.socket = udp.createSocket('udp4');
+
+		// handle replies
+		socket.on('message', function (msg, info) {
+			console.log('Received %d bytes from %s:%d\n', msg.length, info.address, info.port);
+			this.onData(msg);
+		});
+	}
+
+	onData(packet) {
+		console.log('Received: ', packet);
+		if (this.debug) console.log('Received: ' + packet);
+		let v = ViscaCommand.fromPacket(packet);
+		this.emit('data', { uuid: this.uuid, viscaCommand: v });
+	}
+
+	send(viscaCommand) {
+		let packet = viscaCommand.toPacket();
+		if (this.debug) console.log('Sent: ' + packet);
+
+		// sending packet
+		this.socket.send(packet, this.port, this.host, function (error) {
+			if (error) {
+				client.close();
+			} else {
+				console.log('Data sent !!!');
+			}
+		});
+	}
+}
+
+module.exports = { Server, UDPTransport };

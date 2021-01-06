@@ -1,111 +1,190 @@
-const SerialPort = require("serialport");
-const Delimiter = require('@serialport/parser-delimiter');
 const { EventEmitter } = require('events');
+
+const { Constants: C } = require('./constants');
+const { Command } = require("./command");
+const { SerialTransport } = require('./visca-serial');
+const { UDPTransport } = require("./visca-ip");
 
 // the controller keeps track of the cameras connected by serial
 // it also communicates with cameras over IP
 // and it exposes a UDP server for each serially connected camera
-
 class ViscaController extends EventEmitter {
-	DEBUG = true;
-	started = false;
+	serialConnection;
+	ipClients = [];
+	ipServer;
 
-	constructor(portname = "/dev/ttyUSB0", timeout = 1, baudRate = 9600) {
-		if (this.started) return;
-		this.portname = portname;
-		this.timeout = timeout;
-		this.baudRate = baudRate;
+	serialBroadcastCommands = []; // FIFO stack of serial commands sent
 
-		this.cameras = {};       // indexed with integers starting at 1, so we use an object
-		this.ipCameras = {};     // allows us to communicate with ip cameras too
+	constructor() {
+		this.init();
+	}
+
+	init() {
+		this.cameras = {};       // will be indexed with uuid strings for ip cameras
 		this.cameraCount = 0;
-
 	}
 
-	start() {
-		if (this.started) return;
+	// uuid will be specified when the data comes from an IP camera
+	addIPCamera(host, port) {
+		let transport = new UDPTransport(host, port);
+		transport.on('data', this.onUDPData);
 
-		// TODO: remove the hardcoded zoom settings
-		// compute the zoom settings
-		this.ZOOM_SETTINGS_INT = [];
-		for (let a of this.ZOOM_SETTINGS) {
-			let val = Buffer.from(a);
-			this.ZOOM_SETTINGS_INT.push(val);
-		}
+		let camera = new Camera(1, transport); // IP cameras all have index 1
+		cameras[transport.uuid] = camera;
 
-		// open the serial port
-		try {
-			this.serialport = new SerialPort(portname, { baudRate });
-			this.parser = this.serialport.pipe(new Delimiter({ delimiter: [0xff] }))
-			this.serialport.on('open', this.onOpen);   // provides error object
-			this.serialport.on('close', this.onClose); // if disconnected, err.disconnected == true
-			this.serialport.on('error', this.onError); // provides error object
-			this.parser.on('data', this.onData);       // provides a Buffer object
-		} catch (e) {
-			console.log(`Exception opening serial port '${this.portname}' for (display) ${e}\n`);
-		}
+		camera.sendCommand(Command.cmdInterfaceClearAll(1));
+		camera.inquireAll();
 	}
 
-	onOpen() { this.started = true; }
-	onClose(e) { console.log(e); this.started = false; }
-	onError(e) { console.log(e); this.started = false; }
 
-	onData(packet) {
-		// the socket parser gives us only full visca packets
-		// (terminated with 0xff)
-		console.log('Received: ', packet);
-		// this.dump( packet, 'Received:' );
+	// manage the serial transport
+	restartSerial() { this.close(); this.init(); this.start(); }
+	closeSerial() { this.serialConnection.close(); }
+	startSerial(portname = "/dev/ttyUSB0", timeout = 1, baudRate = 9600, debug = false) {
+		this.serialConnection = SerialTransport(portname, timeout, baudRate, debug);
+		this.serialConnection.start();
 
-		// convert to command packet object
-		let v = ViscaCommand.fromPacket(packet);
+		// create callbacks
+		this.serialConnection.on('open', this.onSerialOpen);
+		this.serialConnection.on('close', this.onSerialClose);
+		this.serialConnection.on('error', this.onSerialError);
+		this.serialConnection.on('data', this.onSerialData);
 
-		// make sure we have this camera as an object
-		if (!v.source in this.cameras) this.cameras[v.source] = new Camera();
+		// send enumeration command (on reply, we will send the IF clear command)
+		this.enumerateSerial();
+	}
 
-		let camera = this.cameras[v.source];
+	onSerialOpen() { }
+	onSerialClose() { }
+	onSerialError(e) { console.log(e); }
+	onSerialData(viscaCommand) {
+		let v = viscaCommand;
 
+		// make sure we have this camera as an object if it came from a camera
+		// but leave the camera null if it was a broadcast command
+
+		let camera = null;
+		if (v.source != 0) {
+			if (!(v.source in this.cameras)) {
+				camera = new Camera(v.source, this.serialConnection);
+				camera.uuid = v.source;
+				this.cameras[v.source] = camera;
+			} else {
+				camera = this.cameras[v.source];
+			}
+		}
+
+		if (camera != null) {
+			return this.onCameraData(camera, v);
+		}
+
+		// the following commands are 'passthrough' commands that
+		// go through the whole serial chain as broadcast commands
 		switch (v.msgType) {
-			// the only time a reply is COMMAND is when the
-			// command was IF_CLEAR
-			case MSGTYPE_COMMAND:
-				for (let cam of Object.values(this.cameras)) cam.clear()
+			case C.MSGTYPE_IF_CLEAR:
+				// reset data for all serial port cameras
+				for (let cam of Object.values(this.cameras)) {
+					if (cam.uuid == cam.index) cam.clear();
+				}
+				this.inquireAllSerial();
 				break;
 
-			// network change message
-			case MSGTYPE_NETCHANGE:
-				// a camera issues this when it detects a change
-				this.cmdAddressSet()
+			// address set message, reset all serial port cameras
+			case C.MSGTYPE_ADDRESS_SET:
+				let highestIndex = v.data[0] - 1;
+				for (let i = 1; i <= highestIndex; i++) this.cameras[i] = new Camera(i, this.serialConnection);
+				for (let i = highestIndex + 1; i < 8; i++) delete (this.cameras[i]);
+				this.ifClearAllSerial();
 				break;
 
-			// address set message, reset all cameras
-			case MSGTYPE_ADDRESS_SET:
-				this.cameraCount = v.data[0] - 1;
-				this.cameras = {};
-				for (let i = 0; i < this.cameraCount; i++) this.cameras[i + 1] = new Camera();
-				this.inquireAll();
+			default:
+				break;
+		}
+		this.emit('update');
+	}
+
+	onUDPData({ uuid, viscaCommand }) {
+		let camera = cameras[uuid];
+		return this.onCameraData(camera, viscaCommand);
+	}
+
+	onCameraData(camera, v) {
+		switch (v.msgType) {
+			case C.MSGTYPE_IF_CLEAR:
+				camera.clear();
+				break;
+
+			// network change messages are unprompted
+			case C.MSGTYPE_NETCHANGE:
+				// a camera issues this when it detects a change on the serial line,
+				// and if we get it, we should re-assign all serial port cameras.
+				this.enumerateSerial();
 				break;
 
 			// ack message, one of our commands was accepted and put in a buffer
-			case MSGTYPE_ACK:
+			case C.MSGTYPE_ACK:
 				camera.ack(v);
 				return;
 
 			// completion message
-			case MSGTYPE_COMPLETE:
+			case C.MSGTYPE_COMPLETE:
 				camera.complete(v);
 				break;
 
 			// error messages
-			case MSGTYPE_ERROR:
+			case C.MSGTYPE_ERROR:
 				camera.error(v);
 				break;
 
 			default:
 				break;
 		}
-
 		this.emit('update');
 	}
+
+	sendSerial(viscaCommand) {
+		this.serialConnection.send(viscaCommand);
+	}
+
+	// forces a command to be a broadcast command (only applies to serial)
+	broadcastSerial(viscaCommand) {
+		viscaCommand.broadcast = true;
+		this.serialConnection.send(viscaCommand);
+	}
+
+	// forces a command to go to a specific camera
+	sendToCamera(camera, viscaCommand) {
+		camera.sendCommand(viscaCommand);
+	}
+
+	// system-level commands... only relevant to serial connections
+	enumerateSerial() {
+		this.sendSerial(Command.addressSet());
+	}
+
+	ifClearAllSerial() {
+		this.sendSerial(Command.cmdInterfaceClearAll());
+	}
+
+	// for each camera queue all the inquiry commands
+	// to get a full set of camera status data
+	inquireAllSerial() {
+		for (let camera of cameras) {
+			if (camera.transport == this.serialConnection) {
+				camera.inquireAll();
+			}
+		}
+	}
+
+	inquireAllIP() {
+		for (let camera of cameras) {
+			if (camera.transport.uuid) {
+				camera.inquireAll();
+			}
+		}
+	}
+
+	inquireAll() { this.inquireAllSerial(); this.inquireAllIP(); }
 
 	// for debugging
 	dump(packet, title = null) {
@@ -184,26 +263,6 @@ class ViscaController extends EventEmitter {
 
 		if (packet.length == 3 && qq == 0x38) console.log("Network Change - we should immediately issue a renumbering!");
 	}
-
-	write(packet) {
-		if (!this.serialport.isOpen) return;
-		this.serialport.write(packet);
-		this.dump(packet, "Sent:");
-	}
-
-	// broadcast commands don't care about replies
-	sendBroadcast(viscaCommand) {
-		viscaCommand.broadcast = true;
-		this.write(viscaCommand.toPacket());
-	}
-
-	sendToCamera(camera, viscaCommand) {
-		camera.sendCommand(viscaCommand);
-	}
-
-	// for each camera queue all the inquiry commands
-	// to get a full set of camera status data
-	inquireAll() { }
 }
 
 

@@ -10,7 +10,8 @@
   "license": "ISC",
   "dependencies": {
     "node-hid": "^2.1.1",
-    "serialport": "^9.0.3"
+    "serialport": "^9.0.3",
+    "uuid": "^8.3.2"
   },
   "devDependencies": {}
 }

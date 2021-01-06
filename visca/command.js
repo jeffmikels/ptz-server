@@ -144,7 +144,7 @@ class Command {
 	}
 
 	send(transport) {
-		transport.write(this.toPacket());
+		transport.write(this);
 	}
 
 	ack() {
@@ -178,8 +178,8 @@ class Command {
 	static cmd(recipient = -1, dataType, data = []) {
 		return new Command({ msgType: C.MSGTYPE_COMMAND, dataType, recipient, data });
 	}
-	static inquire(recipient = -1, dataType, data, dataParser) {
-		return new Command({ msgType: C.MSGTYPE_INQUIRY, dataType, recipient, data, dataParser });
+	static inquire(recipient = -1, dataType, data, onComplete, dataParser) {
+		return new Command({ msgType: C.MSGTYPE_INQUIRY, dataType, recipient, data, dataParser, onComplete });
 	}
 	static cancel(recipient = -1, socket = 0) {
 		return new Command({ msgType: C.MSGTYPE_CANCEL | socket, recipient });
@@ -196,11 +196,11 @@ class Command {
 	static cmdOp(recipient = -1, data = []) {
 		return Command.cmd(recipient, C.DATATYPE_OPERATION, data);
 	}
-	static inqCamera(recipient = -1, query, dataParser) {
-		return Command.inquire(recipient, C.DATATYPE_CAMERA, query, dataParser);
+	static inqCamera(recipient = -1, query, onComplete, dataParser) {
+		return Command.inquire(recipient, C.DATATYPE_CAMERA, query, onComplete, dataParser);
 	}
-	static inqOp(recipient = -1, query, dataParser) {
-		return Command.inquire(recipient, C.DATATYPE_OPERATION, query, dataParser);
+	static inqOp(recipient = -1, query, onComplete, dataParser) {
+		return Command.inquire(recipient, C.DATATYPE_OPERATION, query, onComplete, dataParser);
 	}
 
 
@@ -661,64 +661,64 @@ class Command {
 	// Information Display
 
 	// ---------------- Inquiries ---------------------------
-	static inqCameraPower = (recipient = -1) => Command.inqCamera(recipient, C.CAM_POWER);
-	static inqCameraICRMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_ICR);
-	static inqCameraICRAutoMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_AUTO_ICR);
-	static inqCameraICRThreshold = (recipient = -1) => Command.inqCamera(recipient, C.CAM_AUTO_ICR_THRESHOLD, v2iParser);
-	static inqCameraGainLimit = (recipient = -1) => Command.inqCamera(recipient, C.CAM_GAIN_LIMIT);
-	static inqCameraGain = (recipient = -1) => Command.inqCamera(recipient, C.CAM_GAIN_DIRECT, v2iParser);
-	static inqCameraGainR = (recipient = -1) => Command.inqCamera(recipient, C.CAM_RGAIN_DIRECT, v2iParser);
-	static inqCameraGainB = (recipient = -1) => Command.inqCamera(recipient, C.CAM_BGAIN_DIRECT, v2iParser);
+	static inqCameraPower = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_POWER, onComplete, IsOnParser);
+	static inqCameraICRMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_ICR, onComplete, IsOnParser);
+	static inqCameraICRAutoMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_AUTO_ICR, onComplete, IsOnParser);
+	static inqCameraICRThreshold = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_AUTO_ICR_THRESHOLD, onComplete, v2iParser);
+	static inqCameraGainLimit = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_GAIN_LIMIT, onComplete);
+	static inqCameraGain = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_GAIN_DIRECT, onComplete, v2iParser);
+	static inqCameraGainR = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_RGAIN_DIRECT, onComplete, v2iParser);
+	static inqCameraGainB = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_BGAIN_DIRECT, onComplete, v2iParser);
 
-	static inqCameraDZoomMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_DZOOM);
-	static inqCameraZoomPos = (recipient = -1) => Command.inqCamera(recipient, C.CAM_ZOOM_DIRECT, v2iParser);
+	static inqCameraDZoomMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_DZOOM, onComplete, IsOnParser);
+	static inqCameraZoomPos = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_ZOOM_DIRECT, onComplete, v2iParser);
 
-	static inqCameraFocusAutoStatus = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_AUTO);
-	static inqCameraFocusAutoMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_AF_MODE);
-	static inqCameraFocusIRCorrection = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_IR_CORRECTION);
-	static inqCameraFocusPos = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_DIRECT, v2iParser);
-	static inqCameraFocusNearLimit = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_NEAR_LIMIT_POS, v2iParser);
-	static inqCameraFocusAutoIntervalTime = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_AF_INTERVAL, AFIntervalParser);
-	static inqCameraFocusSensitivity = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FOCUS_SENSE_HIGH);
+	static inqCameraFocusAutoStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_AUTO, onComplete, IsOnParser);
+	static inqCameraFocusAutoMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_AF_MODE, onComplete);
+	static inqCameraFocusIRCorrection = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_IR_CORRECTION, onComplete);
+	static inqCameraFocusPos = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_DIRECT, onComplete, v2iParser);
+	static inqCameraFocusNearLimit = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_NEAR_LIMIT_POS, onComplete, v2iParser);
+	static inqCameraFocusAutoIntervalTime = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_AF_INTERVAL, onComplete, AFIntervalParser);
+	static inqCameraFocusSensitivity = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FOCUS_SENSE_HIGH, onComplete);
 
-	static inqCameraWBMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_WB_MODE);
-	static inqCameraExposureMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EXPOSURE_MODE);
-	static inqCameraShutterSlowMode = (recipient = -1) => Command.inqCamera(recipient, C.CAM_SHUTTER_SLOW_AUTO);
-	static inqCameraShutter = (recipient = -1) => Command.inqCamera(recipient, C.CAM_SHUTTER_DIRECT, v2iParser);
-	static inqCameraIris = (recipient = -1) => Command.inqCamera(recipient, C.CAM_IRIS_DIRECT, v2iParser);
-	static inqCameraBrightness = (recipient = -1) => Command.inqCamera(recipient, C.CAM_BRIGHT_DIRECT, v2iParser);
-	static inqCameraExposureCompensationStatus = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EXP_COMP_ENABLE);
-	static inqCameraExposureCompensation = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EXP_COMP_DIRECT, v2iParser);
-	static inqCameraBacklight = (recipient = -1) => Command.inqCamera(recipient, C.CAM_BACKLIGHT);
+	static inqCameraWBMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_WB_MODE, onComplete);
+	static inqCameraExposureMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EXPOSURE_MODE, onComplete);
+	static inqCameraShutterSlowMode = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_SHUTTER_SLOW_AUTO, onComplete, IsOnParser);
+	static inqCameraShutterPos = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_SHUTTER_DIRECT, onComplete, v2iParser);
+	static inqCameraIris = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_IRIS_DIRECT, onComplete, v2iParser);
+	static inqCameraBrightness = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_BRIGHT_DIRECT, onComplete, v2iParser);
+	static inqCameraExposureCompensationStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EXP_COMP_ENABLE, onComplete, IsOnParser);
+	static inqCameraExposureCompensation = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EXP_COMP_DIRECT, onComplete, v2iParser);
+	static inqCameraBacklightStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_BACKLIGHT, onComplete, IsOnParser);
 
-	static inqCameraWideDStatus = (recipient = -1) => Command.inqCamera(recipient, C.CAM_WIDE_D);
-	static inqCameraWideD = (recipient = -1) => Command.inqCamera(recipient, C.CAM_WIDE_D_SET);
+	static inqCameraWideDStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_WIDE_D, onComplete);
+	static inqCameraWideD = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_WIDE_D_SET, onComplete);
 
-	static inqCameraAperture = (recipient = -1) => Command.inqCamera(recipient, C.CAM_APERTURE_DIRECT, v2iParser);
-	static inqCameraHighResStatus = (recipient = -1) => Command.inqCamera(recipient, C.CAM_HIRES_ENABLE);
-	static inqCameraNoiseReductionStatus = (recipient = -1) => Command.inqCamera(recipient, C.CAM_NOISE_REDUCTION);
-	static inqCameraHighSensitivity = (recipient = -1) => Command.inqCamera(recipient, C.CAM_HIGH_SENSITIVITY);
-	static inqCameraFreeze = (recipient = -1) => Command.inqCamera(recipient, C.CAM_FREEZE);
-	static inqCameraEffect = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EFFECT);
-	static inqCameraEffectDigital = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EFFECT_DIGITAL);
-	static inqCameraEffectLevel = (recipient = -1) => Command.inqCamera(recipient, C.CAM_EFFECT_LEVEL);
+	static inqCameraAperture = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_APERTURE_DIRECT, onComplete, v2iParser);
+	static inqCameraHighResStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_HIRES_ENABLE, onComplete, IsOnParser);
+	static inqCameraNoiseReductionStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_NOISE_REDUCTION, onComplete);
+	static inqCameraHighSensitivityStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_HIGH_SENSITIVITY, onComplete, IsOnParser);
+	static inqCameraFreezeStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_FREEZE, onComplete, IsOnParser);
+	static inqCameraEffect = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EFFECT, onComplete);
+	static inqCameraEffectDigital = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EFFECT_DIGITAL, onComplete);
+	static inqCameraEffectDigitalLevel = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_EFFECT_LEVEL, onComplete);
 
-	static inqCameraID = (recipient = -1) => Command.inqCamera(recipient, C.CAM_ID_WRITE, v2iParser);
-	static inqCameraChromaSuppress = (recipient = -1) => Command.inqCamera(recipient, C.CAM_CHROMA_SUPPRESS);
-	static inqCameraColorGain = (recipient = -1) => Command.inqCamera(recipient, C.CAM_COLOR_GAIN, v2iParser);
-	static inqCameraColorHue = (recipient = -1) => Command.inqCamera(recipient, C.CAM_COLOR_HUE, v2iParser);
+	static inqCameraID = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_ID_WRITE, onComplete, v2iParser);
+	static inqCameraChromaSuppressStatus = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_CHROMA_SUPPRESS, onComplete);
+	static inqCameraColorGain = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_COLOR_GAIN, onComplete, v2iParser);
+	static inqCameraColorHue = (recipient = -1, onComplete) => Command.inqCamera(recipient, C.CAM_COLOR_HUE, onComplete, v2iParser);
 
 	// these use op commands
-	static inqVideoSystemNow = (recipient = -1) => Command.inqOp(recipient, C.OP_VIDEO_FORMAT_I_NOW, VideoSystemParser);
-	static inqVideoSystemNext = (recipient = -1) => Command.inqOp(recipient, C.OP_VIDEO_FORMAT_I_NEXT, VideoSystemParser);
+	static inqVideoSystemNow = (recipient = -1, onComplete) => Command.inqOp(recipient, C.OP_VIDEO_FORMAT_I_NOW, onComplete, VideoSystemParser);
+	static inqVideoSystemNext = (recipient = -1, onComplete) => Command.inqOp(recipient, C.OP_VIDEO_FORMAT_I_NEXT, onComplete, VideoSystemParser);
 
-	static inqCameraPanSpeed = (recipient = -1) => Command.inqOp(recipient, C.OP_PAN_MAX_SPEED, PTMaxSpeedParser);
-	static inqCameraPan = (recipient = -1) => Command.inqOp(recipient, C.OP_PAN_POS, PTPosParser);
-	static inqCameraPanStatus = (recipient = -1) => Command.inqOp(recipient, C.OP_PAN_STATUS, PTStatusParser);
+	static inqCameraPanSpeed = (recipient = -1, onComplete) => Command.inqOp(recipient, C.OP_PAN_MAX_SPEED, onComplete, PTMaxSpeedParser);
+	static inqCameraPanPos = (recipient = -1, onComplete) => Command.inqOp(recipient, C.OP_PAN_POS, onComplete, PTPosParser);
+	static inqCameraPanStatus = (recipient = -1, onComplete) => Command.inqOp(recipient, C.OP_PAN_STATUS, onComplete, PTStatusParser);
 
 	// block inquiry commands
-	static inqCameraLens = (recipient = -1) => { let c = Command.raw(recipient, C.CAM_LENS_INQUIRY); c.dataParser = CamLensDataParser; return c; }
-	static inqCameraImage = (recipient = -1) => { let c = Command.raw(recipient, C.CAM_IMAGE_INQUIRY); c.dataParser = CamImageDataParser; return c; }
+	static inqCameraLens = (recipient = -1, onComplete) => { let c = Command.raw(recipient, C.CAM_LENS_INQUIRY); c.dataParser = CamLensDataParser; c.onComplete = onComplete; return c; }
+	static inqCameraImage = (recipient = -1, onComplete) => { let c = Command.raw(recipient, C.CAM_IMAGE_INQUIRY); c.dataParser = CamImageDataParser; c.onComplete = onComplete; return c; }
 }
 
 // Parsers
@@ -731,11 +731,21 @@ class v2iParser {
 class v2siParser {
 	static parse = (data) => v2si(data);
 }
+
+class IsOnParser {
+	static parse = (data) => data == C.DATA_ONVAL;
+}
+class AFIntervalParser {
+	static parse = (data) => Object.freeze({
+		movementTime: v2i(data.slice(0, 2)),
+		intervalTime: v2i(data.slice(2, 4)),
+	});
+}
 class PTMaxSpeedParser {
-	static parse = (data) => Object.freeze({ xspeed: data[0], yspeed: data[1] });
+	static parse = (data) => Object.freeze({ panSpeed: data[0], tiltSpeed: data[1] });
 }
 class PTPosParser {
-	static parse = (data) => Object.freeze({ x: v2si(data.slice(0, 4)), y: v2si(data.slice(4, 8)) });
+	static parse = (data) => Object.freeze({ panPos: v2si(data.slice(0, 4)), tiltPos: v2si(data.slice(4, 8)) });
 }
 class PTStatusParser {
 	static parse = (data) => new PTStatus(data);
