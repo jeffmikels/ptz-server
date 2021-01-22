@@ -6,16 +6,16 @@ console.log(HID.devices());
 // of unsigned values... it does the NOT,
 // but then it interprets the result as a SIGNED value
 // which ends up negative because the original was unsigned
-function unsigned2signed(val, bits = 8){
-    let signBit = Math.pow(2,bits-1); // 0b1000_0000
-    let mask = Math.pow(2,bits); // 0b1_0000_0000
+function unsigned2signed(val, bits = 8) {
+    let signBit = Math.pow(2, bits - 1); // 0b1000_0000
+    let mask = Math.pow(2, bits); // 0b1_0000_0000
     if (val & signBit) return -(mask + ~val + 1);
     else return val;
 }
 
 // var hid = new HID.HID(1356, 2508);
 var hid = new HID.HID(1118, 8);
-hid.on("data", function(data) {
+hid.on("data", function (data) {
     let x = data[1] | ((data[2] & 0b00000011) << 8)
     x = unsigned2signed(x, 10);
 

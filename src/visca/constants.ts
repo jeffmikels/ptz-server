@@ -1,4 +1,4 @@
-class Constants {
+export class Constants {
     // masks for header components
     static HEADERMASK_SOURCE = 0b01110000;
     static HEADERMASK_RECIPIENT = 0b00000111;
@@ -299,5 +299,3 @@ class Constants {
         0x7AC0,
     ];
 }
-
-module.exports = { Constants }

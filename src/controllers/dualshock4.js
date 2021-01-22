@@ -1,15 +1,15 @@
 var HID = require('node-hid');
 
-const dpadcodes = ['N','NE','E','SE','S','SW','W','NW','C'];
+const dpadcodes = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'C'];
 
 // quick and dirty 6 bit twos complement
 // because of how javascript handles bitwise NOT
 // of unsigned values... it does the NOT,
 // but then it interprets the result as a SIGNED value
 // which ends up negative because the original was unsigned
-function unsigned2signed(val, bits = 8){
-    let signBit = Math.pow(2,bits-1); // 0b1000_0000
-    let mask = Math.pow(2,bits); // 0b1_0000_0000
+function unsigned2signed(val, bits = 8) {
+    let signBit = Math.pow(2, bits - 1); // 0b1000_0000
+    let mask = Math.pow(2, bits); // 0b1_0000_0000
     if (val & signBit) return -(mask + ~val + 1);
     else return val;
 }
@@ -56,27 +56,27 @@ class Dualshock4 {
 
         let dpadval = data[5] & 0b00001111;
         let dpadcode = dpadcodes[dpadval];
-        status.dpad = {value: dpadval, code: dpadcode}
+        status.dpad = { value: dpadval, code: dpadcode }
 
         status.buttonT = (data[5] & 0b10000000) != 0;
         status.buttonO = (data[5] & 0b01000000) != 0;
         status.buttonX = (data[5] & 0b00100000) != 0;
         status.buttonS = (data[5] & 0b00010000) != 0;
 
-        status.buttonShare   = (data[6] & 0b00010000) != 0;
-        status.buttonOption  = (data[6] & 0b00100000) != 0;
+        status.buttonShare = (data[6] & 0b00010000) != 0;
+        status.buttonOption = (data[6] & 0b00100000) != 0;
 
-        status.buttonLS      = (data[6] & 0b01000000) != 0;
-        status.buttonRS      = (data[6] & 0b10000000) != 0;
+        status.buttonLS = (data[6] & 0b01000000) != 0;
+        status.buttonRS = (data[6] & 0b10000000) != 0;
 
         status.triggerL1 = (data[6] & 0b0001) != 0;
         status.triggerR1 = (data[6] & 0b0010) != 0;
         status.triggerL2 = (data[6] & 0b0100) != 0;
         status.triggerR2 = (data[6] & 0b1000) != 0;
-        
+
         status.analogL2 = data[8];
         status.analogR2 = data[9];
-        
+
         // TODO: touchpad data
 
         // let dirty = false;
@@ -94,7 +94,7 @@ class Dualshock4 {
         //         break;
         //     }
         // }
-        
+
         if (!deepEquals(status, this.status)) {
             this.status = status;
             if (this.callback != null) this.callback(status);

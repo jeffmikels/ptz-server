@@ -1,4 +1,4 @@
-const fs = require('fs');
+import fs from 'fs';
 
 let macros;
 if (fs.existsSync('macros.json')) {
@@ -9,7 +9,7 @@ if (fs.existsSync('macros.json')) {
 	}
 }
 
-let config = {
+export let config = {
 	// serial port for talking to visca cameras
 	viscaSerial: {
 		port: 'COM8',
@@ -38,5 +38,3 @@ let config = {
 
 	macros
 }
-
-module.exports = config;

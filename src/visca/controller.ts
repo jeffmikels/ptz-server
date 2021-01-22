@@ -1,21 +1,22 @@
-const { EventEmitter } = require('events');
+import { EventEmitter } from 'events'
 
-const { Constants: C } = require('./constants');
-const { Command } = require("./command");
-const { SerialTransport } = require('./visca-serial');
-const { UDPTransport } = require("./visca-ip");
+import * as C from './constants'
+import { ViscaCommand } from "./command"
+import { Camera } from "./camera"
+import { SerialTransport } from './visca-serial'
+import { UDPTransport, ViscaServer } from "./visca-ip"
+import { config } from '../config'
 
 // the controller keeps track of the cameras connected by serial
 // it also communicates with cameras over IP
 // and it exposes a UDP server for each serially connected camera
-class ViscaController extends EventEmitter {
-	serialConnection;
-	ipClients = [];
-	ipServer;
+export class ViscaController extends EventEmitter {
+	serialConnection: SerialTransport;
+	ipServers: ViscaServer[] = [];
+	serialBroadcastCommands: ViscaCommand[] = []; // FIFO stack of serial commands sent
+	cameras: Camera[]
 
-	serialBroadcastCommands = []; // FIFO stack of serial commands sent
-
-	constructor() {
+	construct() {
 		this.init();
 	}
 
@@ -32,7 +33,7 @@ class ViscaController extends EventEmitter {
 		let camera = new Camera(1, transport); // IP cameras all have index 1
 		cameras[transport.uuid] = camera;
 
-		camera.sendCommand(Command.cmdInterfaceClearAll(1));
+		camera.sendCommand(ViscaCommand.cmdInterfaceClearAll(1));
 		camera.inquireAll();
 	}
 
@@ -40,7 +41,7 @@ class ViscaController extends EventEmitter {
 	// manage the serial transport
 	restartSerial() { this.close(); this.init(); this.start(); }
 	closeSerial() { this.serialConnection.close(); }
-	startSerial(portname = "/dev/ttyUSB0", timeout = 1, baudRate = 9600, debug = false) {
+	startSerial(portname = "/dev/ttyUSB0", baudRate = 9600, timeout = 1, debug = false) {
 		this.serialConnection = SerialTransport(portname, timeout, baudRate, debug);
 		this.serialConnection.start();
 
@@ -95,6 +96,7 @@ class ViscaController extends EventEmitter {
 				for (let i = 1; i <= highestIndex; i++) this.cameras[i] = new Camera(i, this.serialConnection);
 				for (let i = highestIndex + 1; i < 8; i++) delete (this.cameras[i]);
 				this.ifClearAllSerial();
+				this.setupIPProxies();
 				break;
 
 			default:
@@ -159,11 +161,11 @@ class ViscaController extends EventEmitter {
 
 	// system-level commands... only relevant to serial connections
 	enumerateSerial() {
-		this.sendSerial(Command.addressSet());
+		this.sendSerial(ViscaCommand.addressSet());
 	}
 
 	ifClearAllSerial() {
-		this.sendSerial(Command.cmdInterfaceClearAll());
+		this.sendSerial(ViscaCommand.cmdInterfaceClearAll());
 	}
 
 	// for each camera queue all the inquiry commands
@@ -185,6 +187,21 @@ class ViscaController extends EventEmitter {
 	}
 
 	inquireAll() { this.inquireAllSerial(); this.inquireAllIP(); }
+
+	setupIPProxies() {
+		for (let server of this.ipServers) server.close();
+		this.ipServers = [];
+		for (let camera of this.cameras) {
+			if (camera.transport.uuid) continue;
+
+			let port = config.viscaServer.basePort + camera.index;
+			let server = ViscaServer(port);
+			server.on('data', (viscaCommand) => {
+				this.onCameraData(camera, viscaCommand);
+			});
+			this.ipServers.push(server);
+		}
+	}
 
 	// for debugging
 	dump(packet, title = null) {
@@ -264,7 +281,3 @@ class ViscaController extends EventEmitter {
 		if (packet.length == 3 && qq == 0x38) console.log("Network Change - we should immediately issue a renumbering!");
 	}
 }
-
-
-
-module.exports = { ViscaController };
