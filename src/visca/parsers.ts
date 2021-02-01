@@ -1,5 +1,5 @@
 import * as utils from './utils'
-import { PanSpeed, PTPos, AFInterval, PTStatus, CamImageData, CamLensData, CamWideDParams } from './camera'
+import { PTSpeed, PTPos, AFInterval, PTStatus, CamImageData, CamLensData, CamWideDParams } from './camera'
 import { Constants as C } from './constants'
 
 export class BaseParser {
@@ -30,7 +30,7 @@ export class AFIntervalParser implements BaseParser {
 	} ) as AFInterval;
 }
 export class PTMaxSpeedParser implements BaseParser {
-	static parse = ( data: number[] ) => Object.freeze( { panSpeed: data[ 0 ], tiltSpeed: data[ 1 ] } ) as PanSpeed;
+	static parse = ( data: number[] ) => Object.freeze( { panSpeed: data[ 0 ], tiltSpeed: data[ 1 ] } ) as PTSpeed;
 }
 export class PTPosParser implements BaseParser {
 	static parse = ( data: number[] ) => Object.freeze( { panPos: utils.v2si( data.slice( 0, 4 ) ), tiltPos: utils.v2si( data.slice( 4, 8 ) ) } ) as PTPos;
