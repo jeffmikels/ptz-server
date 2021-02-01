@@ -3,6 +3,7 @@ import { Constants as C } from './constants'
 import { ViscaTransport } from './transport';
 import * as utils from './utils'
 import * as Parsers from './parsers'
+import { CamImageData, CamLensData, CamWideDParams, PTSpeed, PTPos, PTStatus } from './camera';
 
 
 // according to the documentation:
@@ -43,9 +44,9 @@ interface ViscaCommandParams {
 	dataType?: number;
 	data?: number[];
 	onComplete?: Function;
-	onError?: Function;
+	onError?: (x:string)=>void;
 	onAck?: Function;
-	dataParser?: Function;
+	dataParser?: (x:number[])=>any;
 	status?: number;
 }
 
@@ -57,11 +58,15 @@ export class ViscaCommand {
 	socket: number;
 	dataType: number;
 	data: number[];
-	onComplete: Function;
-	onError: Function;
+	dataParser: (x:number[])=>any;
 	onAck: Function;
-	dataParser: Function;
+	onComplete: Function;
+	onError: (x:string)=>void;
 	status: number;
+
+	// local metadata
+	addedAt: number;
+	sentAt: number;
 
 	constructor( {
 		// header items
@@ -81,7 +86,7 @@ export class ViscaCommand {
 		onComplete = null,
 		onError = null,
 		onAck = null,
-		dataParser = null
+		dataParser = Parsers.NoParser.parse,
 	}: ViscaCommandParams ) {
 
 		// header items
@@ -169,9 +174,9 @@ export class ViscaCommand {
 		if ( this.onAck != null ) this.onAck();
 	}
 
-	error() {
+	error(err:string) {
 		this.status = C.MSGTYPE_ERROR;
-		if ( this.onError != null ) this.onError();
+		if ( this.onError != null ) this.onError(err);
 	}
 
 	// some command completions include data
@@ -195,7 +200,7 @@ export class ViscaCommand {
 	static cmd( recipient = -1, dataType: number, data: number[] = [] ) {
 		return new ViscaCommand( { msgType: C.MSGTYPE_COMMAND, dataType, recipient, data } );
 	}
-	static inquire( recipient = -1, dataType: number, data: number[], onComplete: Function, dataParser: Function ) {
+	static inquire( recipient = -1, dataType: number, data: number[], onComplete: Function, dataParser: (x:number[])=>any ) {
 		return new ViscaCommand( { msgType: C.MSGTYPE_INQUIRY, dataType, recipient, data, dataParser, onComplete } );
 	}
 	static cancel( recipient = -1, socket = 0 ) {
@@ -213,10 +218,12 @@ export class ViscaCommand {
 	static cmdOp( recipient = -1, data: number[] = [] ) {
 		return ViscaCommand.cmd( recipient, C.DATATYPE_OPERATION, data );
 	}
-	static inqCamera( recipient = -1, query: number[], onComplete?: Function, dataParser?: Function ) {
+
+	// inquiry commands complete with data
+	static inqCamera( recipient = -1, query: number[], onComplete?: Function, dataParser?: (x:number[])=>any ) {
 		return ViscaCommand.inquire( recipient, C.DATATYPE_CAMERA, query, onComplete, dataParser );
 	}
-	static inqOp( recipient = -1, query: number[], onComplete: Function, dataParser: Function ) {
+	static inqOp( recipient = -1, query: number[], onComplete: Function, dataParser: (x:number[])=>any ) {
 		return ViscaCommand.inquire( recipient, C.DATATYPE_OPERATION, query, onComplete, dataParser );
 	}
 
@@ -233,7 +240,7 @@ export class ViscaCommand {
 		// time = minutes without command until standby
 		// 0: disable
 		// 0xffff: 65535 minutes
-		let subcmd = [ 0x40, ...utils.i2v( time ) ];
+		let subcmd = [ C.CAM_SLEEP_TIME, ...utils.i2v( time ) ];
 		return ViscaCommand.cmdCamera( device, subcmd )
 	}
 
@@ -242,15 +249,15 @@ export class ViscaCommand {
 	// PTZOptics can store presets 0-127
 	// Sony has only 0-5
 	static cmdCameraPresetReset( device: number, preset = 0 ) {
-		let subcmd = [ C.CAM_MEMORY, 0x00, preset ];
+		let subcmd = [ C.CAM_MEMORY, C.DATA_RESET, preset ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraPresetSet( device: number, preset = 0 ) {
-		let subcmd = [ C.CAM_MEMORY, 0x01, preset ];
+		let subcmd = [ C.CAM_MEMORY, C.DATA_RESET, preset ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraPresetRecall( device: number, preset = 0 ) {
-		let subcmd = [ C.CAM_MEMORY, 0x02, preset ];
+		let subcmd = [ C.CAM_MEMORY, C.DATA_RESET, preset ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 
@@ -278,37 +285,38 @@ export class ViscaCommand {
 	}
 	static cmdCameraPanTiltHome( device: number ) { return ViscaCommand.cmdOp( device, [ C.OP_PAN_HOME ] ) }
 	static cmdCameraPanTiltReset( device: number ) { return ViscaCommand.cmdOp( device, [ C.OP_PAN_RESET ] ) }
+	
 	// corner should be C.DATA_PANTILT_UR or C.DATA_PANTILT_BL
 	static cmdCameraPanTiltLimitSet( device: number, corner: number, x: number, y: number ) {
 		let xv = utils.si2v( x );
 		let yv = utils.si2v( y );
-		let subcmd = [ C.OP_PAN_LIMIT, 0x00, corner, ...xv, ...yv ];
+		let subcmd = [ C.OP_PAN_LIMIT, C.DATA_RESET, corner, ...xv, ...yv ];
 		return ViscaCommand.cmdOp( device, subcmd );
 	}
 	static cmdCameraPanTiltLimitClear( device: number, corner: number ) {
-		let subcmd = [ C.OP_PAN_LIMIT, 0x01, corner, 0x07, 0x0F, 0x0F, 0x0F, 0x07, 0x0F, 0x0F, 0x0F ];
+		let subcmd = [ C.OP_PAN_LIMIT, C.CMD_CAM_VAL_CLEAR, corner, 0x07, 0x0F, 0x0F, 0x0F, 0x07, 0x0F, 0x0F, 0x0F ];
 		return ViscaCommand.cmdOp( device, subcmd );
 	}
 
 	// ZOOM ===============================
 	/// offinout = 0x00, 0x02, 0x03
 	/// speed = 0(low)..7(high) (-1 means default)
-	static cmdCameraZoom( device: number, offinout = 0x00, speed = -1 ) {
+	static cmdCameraZoom( device: number, offinout = C.DATA_RESET, speed = -1 ) {
 		let data = offinout;
-		if ( speed > -1 && offinout != 0x00 ) data = ( data << 8 ) + ( speed & 0b111 )
+		if ( speed > -1 && offinout != C.DATA_RESET ) data = ( data << 8 ) + ( speed & 0b111 )
 		let subcmd = [ C.CAM_ZOOM, data ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraZoomStop( device: number ) {
-		return ViscaCommand.cmdCameraZoom( device, 0x00 );
+		return ViscaCommand.cmdCameraZoom( device, C.DATA_RESET );
 	}
 	/// zoom in with speed = 0..7 (-1 means default)
 	static cmdCameraZoomIn( device: number, speed = -1 ) {
-		return ViscaCommand.cmdCameraZoom( device, C.DATA_ZOOMIN, speed );
+		return ViscaCommand.cmdCameraZoom( device, C.DATA_MORE, speed );
 	}
 	/// zoom out with speed = 0..7 (-1 means default)
 	static cmdCameraZoomOut( device: number, speed = -1 ) {
-		return ViscaCommand.cmdCameraZoom( device, C.DATA_ZOOMOUT, speed );
+		return ViscaCommand.cmdCameraZoom( device, C.DATA_LESS, speed );
 	}
 
 	/// max zoom value is 0x4000 (16384) unless digital is enabled
@@ -329,22 +337,22 @@ export class ViscaCommand {
 
 	/// stopfarnear = 0x00, 0x02, 0x03
 	/// speed = 0(low)..7(high) -1 means default
-	static cmdCameraFocus( device: number, stopfarnear = 0x00, speed = -1 ) {
+	static cmdCameraFocus( device: number, stopfarnear = C.DATA_RESET, speed = -1 ) {
 		let data = stopfarnear;
-		if ( speed > -1 && stopfarnear != 0x00 ) data = ( data << 8 ) + ( speed & 0b111 )
+		if ( speed > -1 && stopfarnear != C.DATA_RESET ) data = ( data << 8 ) + ( speed & 0b111 )
 		let subcmd = [ C.CAM_ZOOM, data ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraFocusStop( device: number ) {
-		return ViscaCommand.cmdCameraFocus( device, 0x00 );
+		return ViscaCommand.cmdCameraFocus( device, C.DATA_RESET );
 	}
 	/// zoom in with speed = 0..7 (-1 means default)
 	static cmdCameraFocusFar( device: number, speed = -1 ) {
-		return ViscaCommand.cmdCameraFocus( device, C.DATA_FOCUSFAR, speed );
+		return ViscaCommand.cmdCameraFocus( device, C.DATA_MORE, speed );
 	}
 	/// zoom out with speed = 0..7 (-1 means default)
 	static cmdCameraFocusNear( device: number, speed = -1 ) {
-		return ViscaCommand.cmdCameraFocus( device, C.DATA_FOCUSNEAR, speed );
+		return ViscaCommand.cmdCameraFocus( device, C.DATA_LESS, speed );
 	}
 	/// max focus value is 0xF000
 	/// 0xpqrs -> 0x0p 0x0q 0x0r 0x0s
@@ -357,16 +365,16 @@ export class ViscaCommand {
 		let subcmd = [ C.CAM_FOCUS_AUTO, data ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraFocusAutoManual( device: number, data: number ) {
+	static cmdCameraFocusAutoToggle( device: number, data: number ) {
 		let subcmd = [ C.CAM_FOCUS_AUTO, C.DATA_TOGGLEVAL ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraFocusAutoTrigger( device: number, data: number ) {
-		let subcmd = [ C.CAM_FOCUS_TRIGGER, 0x01 ];
+	static cmdCameraFocusTrigger( device: number, data: number ) {
+		let subcmd = [ C.CAM_FOCUS_TRIGGER, C.CMD_CAM_FOCUS_TRIGGER_NOW ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraFocusInfinity( device: number, data: number ) {
-		let subcmd = [ C.CAM_FOCUS_TRIGGER, 0x02 ];
+		let subcmd = [ C.CAM_FOCUS_TRIGGER, C.CMD_CAM_FOCUS_TRIGGER_INF ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraFocusSetNearLimit( device: number, limit = 0xf000 ) {
@@ -380,7 +388,7 @@ export class ViscaCommand {
 		let subcmd = [ C.CAM_FOCUS_SENSE_HIGH, data ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	/// mode = 0 (normal), 1 (interval), 2 (trigger)
+	/// mode = 0 (on motion), 1 (on interval), 2 (on zoom)
 	static cmdCameraFocusAutoMode( device: number, mode = 0 ) {
 		let subcmd = [ C.CAM_FOCUS_AF_MODE, mode ];
 		return ViscaCommand.cmdCamera( device, subcmd );
@@ -447,7 +455,7 @@ export class ViscaCommand {
 	}
 	static cmdCameraGainUp( device: number ) { let mode = ''; return ViscaCommand.cmdCameraGain( device, mode, C.DATA_ONVAL ); }
 	static cmdCameraGainDown( device: number ) { let mode = ''; return ViscaCommand.cmdCameraGain( device, mode, C.DATA_OFFVAL ); }
-	static cmdCameraGainReset( device: number ) { let mode = ''; return ViscaCommand.cmdCameraGain( device, mode, 0x00 ); }
+	static cmdCameraGainReset( device: number ) { let mode = ''; return ViscaCommand.cmdCameraGain( device, mode, C.DATA_RESET ); }
 	static cmdCameraGainDirect( device: number, value: number ) { let mode = 'r'; return ViscaCommand.cmdCameraGain( device, mode, 0x00, value ); }
 	static cmdCameraGainRUp( device: number ) { let mode = 'r'; return ViscaCommand.cmdCameraGain( device, mode, C.DATA_ONVAL ); }
 	static cmdCameraGainRDown( device: number ) { let mode = 'r'; return ViscaCommand.cmdCameraGain( device, mode, C.DATA_OFFVAL ); }
@@ -472,21 +480,21 @@ export class ViscaCommand {
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraExposureCompensationEnable( device: number, enable = true ) {
-		let subcmd = [ C.CAM_EXP_COMP_ENABLE, enable ? 0x02 : 0x03 ];
+		let subcmd = [ C.CAM_EXP_COMP_ENABLE, enable ? C.DATA_ONVAL : C.DATA_OFFVAL ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraExposureCompensationAdjust( device: number, resetupdown = 0x00 ) {
+	static cmdCameraExposureCompensationAdjust( device: number, resetupdown: number) {
 		let subcmd = [ C.CAM_EXP_COMP, resetupdown ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraExposureCompensationUp( device: number ) {
-		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, 0x02 );
+		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, C.DATA_MORE );
 	}
 	static cmdCameraExposureCompensationDown( device: number ) {
-		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, 0x03 );
+		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, C.DATA_LESS );
 	}
 	static cmdCameraExposureCompensationReset( device: number ) {
-		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, 0x00 );
+		return ViscaCommand.cmdCameraExposureCompensationAdjust( device, C.DATA_RESET );
 	}
 	static cmdCameraExposureCompensationDirect( device: number, directval = 0 ) {
 		let subcmd = [ C.CAM_EXP_COMP_DIRECT, ...utils.i2v( directval ) ];
@@ -502,57 +510,57 @@ export class ViscaCommand {
 	// SHUTTER ========================================
 
 	/// resetupdown = 0, 2, 3
-	static cmdCameraShutter( device: number, resetupdown = 0x00, directvalue = -1 ) {
+	static cmdCameraShutter( device: number, resetupdown:number, directvalue = -1 ) {
 		let subcmd = [ C.CAM_SHUTTER, resetupdown ];
 		if ( directvalue > -1 ) {
 			subcmd = [ C.CAM_SHUTTER_DIRECT, ...utils.i2v( directvalue ) ];
 		}
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraShutterUp( device: number ) { let r = 0x02; return ViscaCommand.cmdCameraShutter( device, r ) }
-	static cmdCameraShutterDown( device: number ) { let r = 0x03; return ViscaCommand.cmdCameraShutter( device, r ) }
-	static cmdCameraShutterReset( device: number ) { let r = 0x00; return ViscaCommand.cmdCameraShutter( device, r ) }
-	static cmdCameraShutterDirect( device: number, value = 0 ) { let r = 0x00; return ViscaCommand.cmdCameraShutter( device, r, value ) }
+	static cmdCameraShutterUp( device: number ) { return ViscaCommand.cmdCameraShutter( device, C.DATA_MORE ) }
+	static cmdCameraShutterDown( device: number ) { return ViscaCommand.cmdCameraShutter( device, C.DATA_LESS ) }
+	static cmdCameraShutterReset( device: number ) { return ViscaCommand.cmdCameraShutter( device, C.DATA_RESET ) }
+	static cmdCameraShutterDirect( device: number, value = 0 ) { return ViscaCommand.cmdCameraShutter( device, C.DATA_RESET, value ) }
 	static cmdCameraShutterSlow( device: number, auto = true ) {
-		let subcmd = [ C.CAM_SHUTTER_SLOW_AUTO, auto ? 0x02 : 0x03 ];
+		let subcmd = [ C.CAM_SHUTTER_SLOW_AUTO, auto ? C.DATA_ONVAL : C.DATA_OFFVAL ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 
 	/// IRIS ======================================
 	/// resetupdown = 0, 2, 3
-	static cmdCameraIris( device: number, resetupdown = 0x00, directvalue = -1 ) {
+	static cmdCameraIris( device: number, resetupdown:number, directvalue = -1 ) {
 		let subcmd = [ C.CAM_IRIS, resetupdown ];
 		if ( directvalue > -1 ) {
 			subcmd = [ C.CAM_IRIS_DIRECT, ...utils.i2v( directvalue ) ];
 		}
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraIrisUp( device: number ) { let r = 0x02; return ViscaCommand.cmdCameraIris( device, r ) }
-	static cmdCameraIrisDown( device: number ) { let r = 0x03; return ViscaCommand.cmdCameraIris( device, r ) }
-	static cmdCameraIrisReset( device: number ) { let r = 0x00; return ViscaCommand.cmdCameraIris( device, r ) }
-	static cmdCameraIrisDirect( device: number, value = 0 ) { let r = 0x00; return ViscaCommand.cmdCameraIris( device, r, value ) }
+	static cmdCameraIrisUp( device: number ) { return ViscaCommand.cmdCameraIris( device, C.DATA_MORE ) }
+	static cmdCameraIrisDown( device: number ) { return ViscaCommand.cmdCameraIris( device, C.DATA_LESS ) }
+	static cmdCameraIrisReset( device: number ) { return ViscaCommand.cmdCameraIris( device, C.DATA_RESET ) }
+	static cmdCameraIrisDirect( device: number, value = 0 ) { return ViscaCommand.cmdCameraIris( device, C.DATA_RESET, value ) }
 	// APERTURE =====================================
 	/// resetupdown = 0, 2, 3
-	static cmdCameraAperture( device: number, resetupdown = 0x00, directvalue = -1 ) {
+	static cmdCameraAperture( device: number, resetupdown:number, directvalue = -1 ) {
 		let subcmd = [ C.CAM_APERTURE, resetupdown ];
 		if ( directvalue > -1 ) {
 			subcmd = [ C.CAM_APERTURE_DIRECT, ...utils.i2v( directvalue ) ];
 		}
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
-	static cmdCameraApertureUp( device: number ) { let r = 0x02; return ViscaCommand.cmdCameraAperture( device, r ) }
-	static cmdCameraApertureDown( device: number ) { let r = 0x03; return ViscaCommand.cmdCameraAperture( device, r ) }
-	static cmdCameraApertureReset( device: number ) { let r = 0x00; return ViscaCommand.cmdCameraAperture( device, r ) }
-	static cmdCameraApertureDirect( device: number, value = 0 ) { let r = 0x00; return ViscaCommand.cmdCameraAperture( device, r, value ) }
+	static cmdCameraApertureUp( device: number ) { return ViscaCommand.cmdCameraAperture( device, C.DATA_MORE ) }
+	static cmdCameraApertureDown( device: number ) { return ViscaCommand.cmdCameraAperture( device, C.DATA_LESS ) }
+	static cmdCameraApertureReset( device: number ) { return ViscaCommand.cmdCameraAperture( device, C.DATA_RESET ) }
+	static cmdCameraApertureDirect( device: number, value = 0 ) { return ViscaCommand.cmdCameraAperture( device, C.DATA_RESET, value ) }
 
 
 	// QUALITY ==================================
 	static cmdCameraHighResMode( device: number, enable = true ) {
-		let subcmd = [ C.CAM_HIRES_ENABLE, enable ? 0x02 : 0x03 ];
+		let subcmd = [ C.CAM_HIRES_ENABLE, enable ? C.DATA_ONVAL : C.DATA_OFFVAL ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraHighSensitivityMode( device: number, enable = true ) {
-		let subcmd = [ C.CAM_HIGH_SENSITIVITY, enable ? 0x02 : 0x03 ];
+		let subcmd = [ C.CAM_HIGH_SENSITIVITY, enable ? C.DATA_ONVAL : C.DATA_OFFVAL ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	/// val = 0..5
@@ -634,11 +642,13 @@ export class ViscaCommand {
 
 	// ICR =======================================
 	static cmdCameraICR( device: number, enable = true ) {
-		let subcmd = [ C.CAM_ICR, enable ? 0x02 : 0x03 ];
+		let mode = enable ? C.DATA_ONVAL : C.DATA_OFFVAL;
+		let subcmd = [ C.CAM_ICR, mode ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraICRAuto( device: number, enable = true ) {
-		let subcmd = [ C.CAM_AUTO_ICR, enable ? 0x02 : 0x03 ];
+		let mode = enable ? C.DATA_ONVAL : C.DATA_OFFVAL;
+		let subcmd = [ C.CAM_AUTO_ICR, mode ];
 		return ViscaCommand.cmdCamera( device, subcmd );
 	}
 	static cmdCameraICRAutoThreshold( device: number, val = 0 ) {
@@ -677,62 +687,63 @@ export class ViscaCommand {
 	// Information Display
 
 	// ---------------- Inquiries ---------------------------
-	static inqCameraPower = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_POWER ], onComplete, Parsers.IsOnParser );
-	static inqCameraICRMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ICR ], onComplete, Parsers.IsOnParser );
-	static inqCameraICRAutoMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_AUTO_ICR ], onComplete, Parsers.IsOnParser );
-	static inqCameraICRThreshold = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_AUTO_ICR_THRESHOLD ], onComplete, Parsers.v2iParser );
-	static inqCameraGainLimit = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_GAIN_LIMIT ], onComplete );
-	static inqCameraGain = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_GAIN_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraGainR = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_RGAIN_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraGainB = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BGAIN_DIRECT ], onComplete, Parsers.v2iParser );
+	// [onComplete] should take the datatype returned by the parser
+	static inqCameraPower = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_POWER ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraICRMode = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ICR ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraICRAutoMode = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_AUTO_ICR ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraICRThreshold = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_AUTO_ICR_THRESHOLD ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraGainLimit = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_GAIN_LIMIT ], onComplete, Parsers.ByteValParser.parse);
+	static inqCameraGain = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_GAIN_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraGainR = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_RGAIN_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraGainB = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BGAIN_DIRECT ], onComplete, Parsers.v2iParser.parse);
 
-	static inqCameraDZoomMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_DZOOM ], onComplete, Parsers.IsOnParser );
-	static inqCameraZoomPos = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ZOOM_DIRECT ], onComplete, Parsers.v2iParser );
+	static inqCameraDZoomMode = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_DZOOM ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraZoomPos = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ZOOM_DIRECT ], onComplete, Parsers.v2iParser.parse);
 
-	static inqCameraFocusAutoStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AUTO ], onComplete, Parsers.IsOnParser );
-	static inqCameraFocusAutoMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AF_MODE ], onComplete );
-	static inqCameraFocusIRCorrection = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_IR_CORRECTION ], onComplete );
-	static inqCameraFocusPos = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraFocusNearLimit = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_NEAR_LIMIT_POS ], onComplete, Parsers.v2iParser );
-	static inqCameraFocusAutoIntervalTime = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AF_INTERVAL ], onComplete, Parsers.AFIntervalParser );
-	static inqCameraFocusSensitivity = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_SENSE_HIGH ], onComplete );
+	static inqCameraFocusAutoStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AUTO ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraFocusAutoMode = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AF_MODE ], onComplete, Parsers.ByteValParser.parse );
+	static inqCameraFocusIRCorrection = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_IR_CORRECTION ], onComplete,Parsers.ByteValParser.parse );
+	static inqCameraFocusPos = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraFocusNearLimit = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_NEAR_LIMIT_POS ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraFocusAutoIntervalTime = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_AF_INTERVAL ], onComplete, Parsers.AFIntervalParser.parse);
+	static inqCameraFocusSensitivity = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FOCUS_SENSE_HIGH ], onComplete, Parsers.ByteValParser.parse );
 
-	static inqCameraWBMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WB_MODE ], onComplete );
-	static inqCameraExposureMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXPOSURE_MODE ], onComplete );
-	static inqCameraShutterSlowMode = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_SHUTTER_SLOW_AUTO ], onComplete, Parsers.IsOnParser );
-	static inqCameraShutterPos = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_SHUTTER_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraIris = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_IRIS_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraBrightness = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BRIGHT_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraExposureCompensationStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXP_COMP_ENABLE ], onComplete, Parsers.IsOnParser );
-	static inqCameraExposureCompensation = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXP_COMP_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraBacklightStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BACKLIGHT ], onComplete, Parsers.IsOnParser );
+	static inqCameraWBMode = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WB_MODE ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraExposureMode = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXPOSURE_MODE ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraShutterSlowMode = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_SHUTTER_SLOW_AUTO ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraShutterPos = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_SHUTTER_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraIris = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_IRIS_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraBrightness = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BRIGHT_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraExposureCompStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXP_COMP_ENABLE ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraExposureCompPosition = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EXP_COMP_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraBacklightStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_BACKLIGHT ], onComplete, Parsers.IsOnParser.parse);
 
-	static inqCameraWideDStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WIDE_D ], onComplete );
-	static inqCameraWideD = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WIDE_D_SET ], onComplete );
+	static inqCameraWideDMode = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WIDE_D ], onComplete, Parsers.ByteValParser.parse );
+	static inqCameraWideDParams = ( recipient = -1, onComplete: (x:CamWideDParams)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_WIDE_D_SET ], onComplete, Parsers.CamWideDParamsParser.parse);
 
-	static inqCameraAperture = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_APERTURE_DIRECT ], onComplete, Parsers.v2iParser );
-	static inqCameraHighResStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_HIRES_ENABLE ], onComplete, Parsers.IsOnParser );
-	static inqCameraNoiseReductionStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_NOISE_REDUCTION ], onComplete );
-	static inqCameraHighSensitivityStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_HIGH_SENSITIVITY ], onComplete, Parsers.IsOnParser );
-	static inqCameraFreezeStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FREEZE ], onComplete, Parsers.IsOnParser );
-	static inqCameraEffect = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT ], onComplete );
-	static inqCameraEffectDigital = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT_DIGITAL ], onComplete );
-	static inqCameraEffectDigitalLevel = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT_LEVEL ], onComplete );
+	static inqCameraAperture = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_APERTURE_DIRECT ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraHighResStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_HIRES_ENABLE ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraNoiseReductionStatus = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_NOISE_REDUCTION ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraHighSensitivityStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_HIGH_SENSITIVITY ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraFreezeStatus = ( recipient = -1, onComplete: (x:boolean)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_FREEZE ], onComplete, Parsers.IsOnParser.parse);
+	static inqCameraEffect = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraEffectDigital = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT_DIGITAL ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraEffectDigitalLevel = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_EFFECT_LEVEL ], onComplete ,Parsers.ByteValParser.parse);
 
-	static inqCameraID = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ID_WRITE ], onComplete, Parsers.v2iParser );
-	static inqCameraChromaSuppressStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_CHROMA_SUPPRESS ], onComplete );
-	static inqCameraColorGain = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_COLOR_GAIN ], onComplete, Parsers.v2iParser );
-	static inqCameraColorHue = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqCamera( recipient, [ C.CAM_COLOR_HUE ], onComplete, Parsers.v2iParser );
+	static inqCameraID = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_ID_WRITE ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraChromaSuppressStatus = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_CHROMA_SUPPRESS ], onComplete ,Parsers.ByteValParser.parse);
+	static inqCameraColorGain = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_COLOR_GAIN ], onComplete, Parsers.v2iParser.parse);
+	static inqCameraColorHue = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqCamera( recipient, [ C.CAM_COLOR_HUE ], onComplete, Parsers.v2iParser.parse);
 
 	// these use op commands
-	static inqVideoSystemNow = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqOp( recipient, [ C.OP_VIDEO_FORMAT_I_NOW ], onComplete, Parsers.VideoSystemParser );
-	static inqVideoSystemNext = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqOp( recipient, [ C.OP_VIDEO_FORMAT_I_NEXT ], onComplete, Parsers.VideoSystemParser );
+	static inqVideoFormatNow = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqOp( recipient, [ C.OP_VIDEO_FORMAT_I_NOW ], onComplete, Parsers.ByteValParser.parse);
+	static inqVideoFormatNext = ( recipient = -1, onComplete: (x:number)=>void ) => ViscaCommand.inqOp( recipient, [ C.OP_VIDEO_FORMAT_I_NEXT ], onComplete, Parsers.ByteValParser.parse);
 
-	static inqCameraPanSpeed = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_MAX_SPEED ], onComplete, Parsers.PTMaxSpeedParser );
-	static inqCameraPanPos = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_POS ], onComplete, Parsers.PTPosParser );
-	static inqCameraPanStatus = ( recipient = -1, onComplete: Function ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_STATUS ], onComplete, Parsers.PTStatusParser );
+	static inqCameraPanTiltSpeed = ( recipient = -1, onComplete: (x:PTSpeed)=>void ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_MAX_SPEED ], onComplete, Parsers.PTMaxSpeedParser.parse);
+	static inqCameraPanTiltPos = ( recipient = -1, onComplete: (x:PTPos)=>void ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_POS ], onComplete, Parsers.PTPosParser.parse);
+	static inqCameraPanTiltStatus = ( recipient = -1, onComplete: (x:PTStatus)=>void ) => ViscaCommand.inqOp( recipient, [ C.OP_PAN_STATUS ], onComplete, Parsers.PTStatusParser.parse);
 
 	// block inquiry commands
-	static inqCameraLens = ( recipient = -1, onComplete: Function ) => { let c = ViscaCommand.raw( recipient, C.CAM_LENS_INQUIRY ); c.dataParser = Parsers.CamLensDataParser; c.onComplete = onComplete; return c; }
-	static inqCameraImage = ( recipient = -1, onComplete: Function ) => { let c = ViscaCommand.raw( recipient, C.CAM_IMAGE_INQUIRY ); c.dataParser = Parsers.CamImageDataParser; c.onComplete = onComplete; return c; }
+	static inqCameraLens = ( recipient = -1, onComplete: (x:CamLensData)=>void ) => { let c = ViscaCommand.raw( recipient, C.CAM_LENS_INQUIRY ); c.dataParser = Parsers.CamLensDataParser.parse; c.onComplete = onComplete; return c; }
+	static inqCameraImage = ( recipient = -1, onComplete: (x:CamImageData)=>void ) => { let c = ViscaCommand.raw( recipient, C.CAM_IMAGE_INQUIRY ); c.dataParser = Parsers.CamImageDataParser.parse; c.onComplete = onComplete; return c; }
 }

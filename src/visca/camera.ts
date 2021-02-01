@@ -1,68 +1,283 @@
 
 import { v4 as uuid } from 'uuid'
 import { EventEmitter } from 'events'
-import { ViscaCommand as Command } from './command'
+import { ViscaCommand as Command, ViscaCommand } from './command'
 import { Constants as C } from './constants'
 import * as utils from './utils'
+import { ViscaTransport } from './transport'
 
+// export class CameraCommandBuffer {
+// 	constructor(
+// 		public command: ViscaCommand,
+// 		public addedAt: number,
+// 	) {}
+// }
+
+export interface PTSpeed {
+	panSpeed: number,
+	tiltSpeed: number,
+}
+
+export interface PTPos {
+	panPos: number,
+	tiltPos: number,
+}
+
+export interface AFInterval {
+	movementTime: number,
+	intervalTime: number
+}
+
+export class PTStatus {
+	public initStatus: number;
+	public initializing: boolean;
+	public ready: boolean;
+	public fail: boolean;
+
+	public moveStatus: number;
+	public moveDone: boolean;
+	public moveFail: boolean;
+
+	public atMaxL: boolean;
+	public atMaxR: boolean;
+	public atMaxU: boolean;
+	public atMaxD: boolean;
+	public moving: boolean;
+
+	constructor() { }
+
+	static fromData(data: number[]): PTStatus {
+		let ret = new PTStatus();
+
+		let [p, q, r, s] = utils.nibbles(data);
+
+		ret.moveStatus = (q & C.PAN_MOVE_FAIL) >> 2;
+		ret.initStatus = (p & C.PAN_INIT_FAIL);
+
+		ret.atMaxL = (s & C.PAN_MAXL) > 0;
+		ret.atMaxR = (s & C.PAN_MAXR) > 0;
+		ret.atMaxU = (s & C.PAN_MAXU) > 0;
+		ret.atMaxD = (s & C.PAN_MAXD) > 0;
+
+		ret.moving = ret.moveStatus == 1;
+		ret.moveDone = ret.moveStatus == 2;
+		ret.moveFail = ret.moveStatus == 3;
+
+		ret.initializing = ret.initStatus == 1;
+		ret.ready = ret.initStatus == 2;
+		ret.fail = ret.initStatus == 3;
+		
+		return ret;
+	}
+}
+
+export class CamLensData {
+	public zooming: boolean;
+	public zoomPos: number;
+	public digitalZoomEnabled: boolean;
+
+	public focusing: boolean;
+	public focusPos: number;
+	public focusNearLimit: number;
+	public autoFocusMode: number;
+	public autoFocusSensitivity: number;
+	public autoFocusEnabled: boolean;
+
+	public lowContrast: boolean;
+	public loadingPreset: boolean;
+
+	constructor() { }
+
+	static fromData(data: number[]): CamLensData {
+		let c = new CamLensData();
+		c.zoomPos = utils.v2i(data.slice(0, 4));
+		c.focusNearLimit = utils.v2i(data.slice(4, 6));
+		c.focusPos = utils.v2i(data.slice(6, 10));
+
+		// no data is in byte 10
+		let ww = data[11]; // byte 11 is byte 13 of the original full packet
+
+		// 0-normal, 1-interval, 2-trigger
+		c.autoFocusMode = (ww & 0b11000) >> 3;
+
+		// 0-slow, 1-normal
+		c.autoFocusSensitivity = (ww & 0b100) >> 2;
+
+		c.digitalZoomEnabled = utils.testBit(ww, 0b10);
+		c.autoFocusEnabled = utils.testBit(ww, 0b1);
+
+		let vv = data[12];
+
+		c.lowContrast = utils.testBit(vv, 0b1000);
+		c.loadingPreset = utils.testBit(vv, 0b100);
+		c.focusing = utils.testBit(vv, 0b10);
+		c.zooming = utils.testBit(vv, 0b1);
+
+		return c;
+	}
+}
+
+export class CamImageData {
+	public gain: number;
+	public gainr: number;
+	public gainb: number;
+	public wbMode: number;
+	public exposureMode: number;
+	public shutterPos: number;
+	public irisPos: number;
+	public gainPos: number;
+	public brightness: number;
+	public exposureCompPosition: number;
+
+	public highResEnabled: boolean;
+	public wideDEnabled: boolean;
+	public backlightCompEnabled: boolean;
+	public exposureCompEnabled: boolean;
+	public slowShutterAutoEnabled: boolean;
+	constructor() { }
+
+	static fromData(data: number[]) {
+		let c = new CamImageData();
+		c.gainr = utils.v2i(data.slice(0, 2))
+		c.gainb = utils.v2i(data.slice(2, 4))
+		c.wbMode = data[4];
+		c.gain = data[5];
+		c.exposureMode = data[6];
+		c.shutterPos = data[8];
+		c.irisPos = data[9];
+		c.gainPos = data[10];
+		c.brightness = data[11];
+		c.exposureCompPosition = data[12];
+
+		let aa = data[7];
+		c.highResEnabled = utils.testBit(aa, 0b100000);
+		c.wideDEnabled = utils.testBit(aa, 0b10000);
+		c.backlightCompEnabled = utils.testBit(aa, 0b100);
+		c.exposureCompEnabled = utils.testBit(aa, 0b10);
+		c.slowShutterAutoEnabled = utils.testBit(aa, 0b1);
+
+		return c;
+	}
+}
+
+export class CamWideDParams {
+	public screenDisplay: number;
+	public detectionSensitivity: number;
+	public shadowCorrectionLevel: number;
+	public highlightCorrectionLevel: number;
+	public exposureRatio: number;
+	constructor() { }
+
+	static fromData(data: number[]) {
+		let c = new CamWideDParams();
+		c.screenDisplay = data[0];
+		c.detectionSensitivity = data[1];
+		c.shadowCorrectionLevel = data[2];
+		c.highlightCorrectionLevel = data[3];
+		c.exposureRatio = (data[4]<<4) | data[5]; // 1-64
+		return c;
+	}
+}
+
+// TODO: Convert most "number" fields to semantic names
+// using an enum or at least semantic map on the constants class
 export class CameraStatus {
-	// == fields accessible by block inquiry
-	// PTStatus
+	// fields obtained from PTStatus are only
+	// inquire-able under that namespace, so
+	// we leave them there
 	panTiltStatus: PTStatus;
 
-	// camera data
-	camImageData: CamImageData;
-	camLensData: CamLensData;
+	// == fields obtained from CamLensData;
+	zooming: boolean;
+	zoomPos: number;
+	digitalZoomEnabled: boolean;
 
-	// == items requiring specific inquiries
-	panPos: number
-	panSpeed: number
+	focusing: boolean;
+	focusPos: number;
+	focusNearLimit: number;
+	autoFocusEnabled: boolean; // you can always send a "trigger" event for one-time autofocus
+	autoFocusSensitivity: number;
 
-	tiltPos: number
-	tiltSpeed: number
+	lowContrast: boolean;
+	loadingPreset: boolean;
 
-	powerStatus: number
-	icrMode: number
-	icrAutoMode: number
-	icrThreshold: number
-	gainLimit: number
+	// == fields obtained from CamImageData inquiry
+	rGain: number;
+	bGain: number;
+	apertureGain: number;
+	wbMode: number;
+	exposureMode: number;
+	shutterPos: number;
+	irisPos: number;
+	gainPos: number;
+	brightness: number;
+	
+	highResEnabled: boolean;
+	wideDEnabled: boolean; // block inquiry responds 0 for off, 1, for all others
+	backlightCompEnabled: boolean;
+	exposureCompEnabled: boolean;
+	exposureCompPosition: number;
+	slowShutterAutoEnabled: boolean;
+	
 
-	focusAutoStatus: boolean
-	focusIRCorrection: boolean
-	focusAutoIntervalTime: number
+	// == items only available through specific inquiries
+	powerStatus: boolean;
 
-	construct( pan = 0, tilt = 0, zoom = 0, dzoom = false, effect = 0 ) {
-		this.pan = pan;
-		this.tilt = tilt;
-		this.zoom = zoom;
-		this.dzoom = dzoom;
-		this.effect = effect;
-		this.updateImageData( {} );
-		this.updateLensData( {} );
-		this.updatePTStatus( {} );
-	}
+	ptPos: PTPos;
+	ptSpeed: PTSpeed;
+	
+	icrMode: boolean;
+	icrAutoMode: boolean;
+	icrThreshold: number;
+	gainLimit: number;
+	
+	autoFocusMode: number; // 0x00, 0x01, 0x02 (normal (on movement), interval, on zoom)
+	autoFocusIntervalTime: number;
+	
+	focusIRCorrection: number;
+	wideDMode: number; // wide dynamic range mode can be on, off, auto (0), 
+	wideDParams: CamWideDParams;
+	
+	noiseReductionLevel: number;
+	highSensitivityEnabled: boolean;
+	frozen: boolean;
+
+	effect: number;
+	digitalEffect: number;
+	digitalEffectLevel: number;
+	chromaSuppressLevel: number;
+
+	cameraID: number;
+	colorGain: number;
+	colorHue: number;
+
+	videoFormatNow: number;
+	videoFormatNext: number;
+
+	constructor() { }
 
 	// takes CamImageData
-	updateImageData( imageData ) {
-		this.gain = imageData.gain;
-		this.gainr = imageData.gainr;
-		this.gainb = imageData.gainb;
+	updateImageData(	imageData: CamImageData ) {
+		this.rGain = imageData.gainr;
+		this.bGain = imageData.gainb;
+		this.apertureGain = imageData.gain;
 		this.wbMode = imageData.wbMode;
 		this.exposureMode = imageData.exposureMode;
 		this.shutterPos = imageData.shutterPos;
 		this.irisPos = imageData.irisPos;
 		this.gainPos = imageData.gainPos;
 		this.brightness = imageData.brightness;
-		this.exposure = imageData.exposure;
+		this.exposureCompPosition = imageData.exposureCompPosition;
 
 		this.highResEnabled = imageData.highResEnabled;
 		this.wideDEnabled = imageData.wideDEnabled;
 		this.backlightCompEnabled = imageData.backlightCompEnabled;
 		this.exposureCompEnabled = imageData.exposureCompEnabled;
+		this.exposureCompPosition = imageData.exposureCompPosition;
 		this.slowShutterAutoEnabled = imageData.slowShutterAutoEnabled;
 	}
 
-	updateLensData( lensData ) {
+	updateLensData(lensData: CamLensData) {
 		this.zooming = lensData.zooming;
 		this.zoomPos = lensData.zoomPos;
 		this.digitalZoomEnabled = lensData.digitalZoomEnabled;
@@ -78,38 +293,54 @@ export class CameraStatus {
 		this.loadingPreset = lensData.loadingPreset;
 	}
 
-	updatePTStatus( ptStatus ) {
-		this.initStatus = ptStatus.initStatus;
-		this.initializing = ptStatus.initializing;
-		this.ready = ptStatus.ready;
-		this.fail = ptStatus.fail;
+	// updatePTStatus() {
+	// 	this.initStatus = ptStatus.initStatus;
+	// 	this.initializing = ptStatus.initializing;
+	// 	this.ready = ptStatus.ready;
+	// 	this.fail = ptStatus.fail;
 
-		this.moveStatus = ptStatus.moveStatus;
-		this.moveDone = ptStatus.moveDone;
-		this.moveFail = ptStatus.moveFail;
+	// 	this.moveStatus = ptStatus.moveStatus;
+	// 	this.moveDone = ptStatus.moveDone;
+	// 	this.moveFail = ptStatus.moveFail;
 
-		this.atMaxL = ptStatus.atMaxL;
-		this.atMaxR = ptStatus.atMaxR;
-		this.atMaxU = ptStatus.atMaxU;
-		this.atMaxD = ptStatus.atMaxD;
-		this.moving = ptStatus.moving;
-	}
+	// 	this.atMaxL = ptStatus.atMaxL;
+	// 	this.atMaxR = ptStatus.atMaxR;
+	// 	this.atMaxU = ptStatus.atMaxU;
+	// 	this.atMaxD = ptStatus.atMaxD;
+	// 	this.moving = ptStatus.moving;
+	// }
 }
 
 export class Camera extends EventEmitter {
-	index: any;
-	transport: any;
-	cameraBuffers: {};
-	sentCommands: any[];
-	commandQueue: any[];
-	inquiryQueue: any[];
+	index: number;
+	uuid: string;
+	transport: ViscaTransport;
+
+	// keep track of the camera status here
 	status: CameraStatus;
+
+	// used to track commands received by cameras
+	cameraBuffers:{ [index:string]: ViscaCommand};
+
+	// commands sent to camera waiting for ACK/DONE
+	sentCommands: ViscaCommand[];
+
+	// commands queued here before sending to camera
+	commandQueue: ViscaCommand[];
+	inquiryQueue: ViscaCommand[];
+	
+	// is this camera open to receiving commands?
 	commandReady: boolean;
 	inquiryReady: boolean;
-	updatetimer: number;
-	uuid: any;
+
+	// we use the timer to send buffered commands
+	updatetimer: NodeJS.Timeout;
+
 	// transport should support the socket interface => .send(ViscaCommand)
-	constructor( index, transport ) {
+	constructor(index: number, transport: ViscaTransport) {
+		super();
+		// typescript only infers these if the constructor arguments
+		// use the public or private keyword
 		this.index = index;
 		this.transport = transport;
 		this.cameraBuffers = {}
@@ -119,44 +350,59 @@ export class Camera extends EventEmitter {
 		this.status = new CameraStatus();
 		this.commandReady = true;             // true when camera can receive commands
 		this.inquiryReady = true;
-		this.updatetimer = 0;
 
-		this.uuid = transport.uuid ?? index; // UDPTransports provide a unique uuid
+		// UDPTransports provide a unique uuid
+		this.uuid = transport.uuid ?? index.toString();
 	}
 
 	_clear() { this.cameraBuffers = {}; this.sentCommands = []; }
+
 	_update() {
-		this._clearOldCommands();
-		this.commandReady = !( 1 in this.cameraBuffers || 2 in this.cameraBuffers );
-		this.inquiryReady = !( 0 in this.cameraBuffers );
+		this.updatetimer = null;
+		this._expireOldCommands();
 		this._processQueue();
-		if ( this.inquiryQueue.length > 0 || this.commandQueue.length > 0 ) {
-			clearTimeout( this.updatetimer );
-			this.updatetimer = setTimeout( this._update, 20 );
-		}
-		this.emit( 'update' );
+		this.emit('update');
 	}
 
-	// if a command in the stack is older than 2 seconds drop it
-	_clearOldCommands() {
+	_updateBooleans() {
+		this.commandReady = !('1' in this.cameraBuffers || '2' in this.cameraBuffers);
+		this.inquiryReady = !('0' in this.cameraBuffers);
+	}
+
+	// if a command in the stack is older than 200ms drop it
+	_expireOldCommands() {
 		let now = Date.now();
-		while ( this.sentCommands.length > 0 ) {
-			if ( now - this.sentCommands[ 0 ].addedAt < 1000 ) break;
-			this.sentCommands.splice( 0, 1 );
+
+		// the first command is always the oldest
+		while (this.sentCommands.length > 0) {
+			if (now - this.sentCommands[0].sentAt < C.COMMAND_TIMEOUT) break;
+			this.sentCommands.splice(0, 1);
 		}
-		for ( let key of Object.keys( this.cameraBuffers ) ) {
-			if ( now - this.cameraBuffers[ key ].addedAt > 1000 )
-				this.sentCommands.splice( 0, 1 );
+
+		// check all cameraBuffers
+		for (let key of Object.keys(this.cameraBuffers)) {
+			if (now - this.cameraBuffers[key].sentAt > C.COMMAND_TIMEOUT)
+				delete this.cameraBuffers[key];
 		}
 	}
 
 	_processQueue() {
-		if ( this.commandReady && this.commandQueue.length > 0 ) {
-			this.sendCommand( this.commandQueue.splice( 0, 1 ) );
+		this._updateBooleans();
+		if (this.commandReady && this.commandQueue.length > 0) {
+			let [ cmd ] = this.commandQueue.splice(0, 1);
+			this.sendCommand(cmd);
 		}
 
-		if ( this.inquiryReady && this.inquiryQueue.length > 0 ) {
-			this.sendCommand( this.inquiryQueue.splice( 0, 1 ) );
+		if (this.inquiryReady && this.inquiryQueue.length > 0) {
+			let [ cmd ] = this.inquiryQueue.splice(0, 1);
+			this.sendCommand(cmd);
+		}
+	}
+
+	_scheduleUpdate() {
+		if (this.updatetimer != null) return;
+		if (this.inquiryQueue.length > 0 || this.commandQueue.length > 0) {
+			this.updatetimer = setTimeout(this._update, 25);
 		}
 	}
 
@@ -165,59 +411,63 @@ export class Camera extends EventEmitter {
 	// because the parsed response will have socket 0.
 	// other commands will be put on the stack until
 	// the ack tells us which socket received it
-	sendCommand( command ) {
+	sendCommand(command:ViscaCommand) {
 		// update the header data
 		command.source = 0;
 		command.recipient = this.index;
 		command.broadcast = false;
 
-		// add metadata so we can expire old commands
 		command.addedAt = Date.now();
 
 		let queued = false;
 
-
 		// INTERFACE_DATA, ADDRESS_SET commands always get sent and aren't tracked
 		// keep track of other commands in order, so we can match replies to commands
-		if ( command.msgType == MSGTYPE_INQUIRY ) {
+		if (command.msgType == C.MSGTYPE_INQUIRY) {
 			// only allow one non-ack command at a time
-			if ( this.inquiryReady ) {
-				this.cameraBuffers[ 0 ] = command; // no ACK, only complete / error
+			if (this.inquiryReady) {
+				this.cameraBuffers['0'] = command; // no ACK, only complete / error
 			} else {
-				this.inquiryQueue.push( command );
+				this.inquiryQueue.push(command);
 				queued = true;
 			}
-		} else if ( command.msgType == MSGTYPE_COMMAND ) {
-			if ( this.commandReady ) {
-				this.sentCommands.push( command ); // not in a buffer until we get ACK
+		} else if (command.msgType == C.MSGTYPE_COMMAND) {
+			if (this.commandReady) {
+				this.sentCommands.push(command); // not in a buffer until we get ACK
 			} else {
-				this.commandQueue.push( command );
+				this.commandQueue.push(command);
 				queued = true;
 			}
 		}
 
-		if ( !queued ) this.transport.send( command );
-		this._update();
+		if (queued) {
+			this._scheduleUpdate();
+		} else {
+			command.sentAt = Date.now();
+			this.transport.write(command);
+		}
 	}
 
-	ack( viscaCommand ) {
+	ack(viscaCommand: ViscaCommand) {
 		// get the first viscaCommand that expects an ACK
-		let cmd = this.sentCommands.splice( 0, 1 ); // pops the head
+		let [cmd] = this.sentCommands.splice(0, 1); // gets the head
 		cmd.ack(); // run the command ACK callback if it exists
-		this.cameraBuffers[ viscaCommand.socket ] = cmd;
-		this._update();
+		this.cameraBuffers[viscaCommand.socket] = cmd;
+		this._scheduleUpdate();
 	}
 
-	complete( viscaCommand ) {
-		this.cameraBuffers[ viscaCommand.socket ].complete( viscaCommand.data );
-		delete ( this.cameraBuffers[ viscaCommand.socket ] );
-		this._update();
+	complete(viscaCommand:ViscaCommand) {
+		let key = viscaCommand.socket.toString();
+		this.cameraBuffers[key].complete(viscaCommand.data);
+		delete this.cameraBuffers[key];
+		this._scheduleUpdate();
 	}
 
-	error( viscaCommand ) {
+	error(viscaCommand:ViscaCommand) {
 		let message;
-		let errorType = viscaCommand.data[ 0 ];
-		switch ( errorType ) {
+		let errorType = viscaCommand.data[0];
+		let socketKey = viscaCommand.socket.toString();
+		switch (errorType) {
 			case C.ERROR_SYNTAX:
 				message = `syntax error, invalid command`
 				break;
@@ -235,194 +485,102 @@ export class Camera extends EventEmitter {
 				message = `command failed`
 				break;
 		}
-		console.log( `camera ${this.index}-${viscaCommand.socket}: ${message}` );
-		this.cameraBuffers[ viscaCommand.socket ].error( errorType );
-		delete ( this.cameraBuffers[ viscaCommand.socket ] );
+		console.log(`camera ${this.index}-${viscaCommand.socket}: ${message}`);
+		this.cameraBuffers[socketKey].error(message);
+		delete (this.cameraBuffers[socketKey]);
 		this._update();
 	}
 
 	inquireAll() {
-		this.getCameraPower();
-		this.getCameraPanStatus();
-		this.getCameraLens();
-		this.getCameraImage();
-		this.getCameraPanPos();
+		this.getPower();      // single command
+		this.getPTStatus();  // block inquiry command
+		this.getLensData();       // block inquiry
+		this.getImageData();      // block inquiry
+	
+		// multiple individual queries
+		this.getPTPos();
+		this.getPTSpeed();
+		this.getICRMode();
+		this.getICRAutoMode();
+		this.getICRThreshold();
+		this.getGainLimit();
+		this.getFocusAutoMode();
+		this.getFocusAutoIntervalTime();
+		this.getFocusIRCorrection();
+		this.getWideDStatus();
+		this.getWideDParams();
+		this.getNoiseReductionStatus();
+		this.getHighSensitivityStatus();
+		this.getFreezeStatus();
+		this.getEffect();
+		this.getEffectDigital();
+		this.getEffectDigitalLevel();
+		this.getChromaSuppressStatus();
+		this.getID();
+		this.getColorGain();
+		this.getColorHue();
+		this.getVideoFormatNow();
+		this.getVideoFormatNext();
 	}
 
 	// camera specific inquiry commands
 	// ---------------- Inquiries ---------------------------
-	getCameraPower() { let v = Command.inqCameraPower( this.index, ( data ) => { this.status.powerStatus = data } ); this.sendCommand( v ); }
-	getCameraICRMode() { let v = Command.inqCameraICRMode( this.index, ( data ) => { this.status.icrMode = data } ); this.sendCommand( v ); }
-	getCameraICRAutoMode() { let v = Command.inqCameraICRAutoMode( this.index, ( data ) => { this.status.icrAutoMode = data } ); this.sendCommand( v ); }
-	getCameraICRThreshold() { let v = Command.inqCameraICRThreshold( this.index, ( data ) => { this.status.icrThreshold = data } ); this.sendCommand( v ); }
-	getCameraGainLimit() { let v = Command.inqCameraGainLimit( this.index, ( data ) => { this.status.gainLimit = data } ); this.sendCommand( v ); }
-	getCameraGain() { let v = Command.inqCameraGain( this.index, ( data ) => { this.status.gain = data } ); this.sendCommand( v ); }
-	getCameraGainR() { let v = Command.inqCameraGainR( this.index, ( data ) => { this.status.gainr = data } ); this.sendCommand( v ); }
-	getCameraGainB() { let v = Command.inqCameraGainB( this.index, ( data ) => { this.status.gainb = data } ); this.sendCommand( v ); }
+	getPower() { let v = Command.inqCameraPower(this.index, (data) => { this.status.powerStatus = data }); this.sendCommand(v); }
+	getICRMode() { let v = Command.inqCameraICRMode(this.index, (data) => { this.status.icrMode = data }); this.sendCommand(v); }
+	getICRAutoMode() { let v = Command.inqCameraICRAutoMode(this.index, (data) => { this.status.icrAutoMode = data }); this.sendCommand(v); }
+	getICRThreshold() { let v = Command.inqCameraICRThreshold(this.index, (data) => { this.status.icrThreshold = data }); this.sendCommand(v); }
+	getGainLimit() { let v = Command.inqCameraGainLimit(this.index, (data) => { this.status.gainLimit = data }); this.sendCommand(v); }
+	getGain() { let v = Command.inqCameraGain(this.index, (data) => { this.status.apertureGain = data }); this.sendCommand(v); }
+	getGainR() { let v = Command.inqCameraGainR(this.index, (data) => { this.status.rGain = data }); this.sendCommand(v); }
+	getGainB() { let v = Command.inqCameraGainB(this.index, (data) => { this.status.bGain = data }); this.sendCommand(v); }
 
-	getCameraDZoomMode() { let v = Command.inqCameraDZoomMode( this.index, ( data ) => { this.status.dzoom = data } ); this.sendCommand( v ); }
-	getCameraZoomPos() { let v = Command.inqCameraZoomPos( this.index, ( data ) => { this.status.zoomPos = data } ); this.sendCommand( v ); }
+	getDZoomMode() { let v = Command.inqCameraDZoomMode(this.index, (data) => { this.status.digitalZoomEnabled = data }); this.sendCommand(v); }
+	getZoomPos() { let v = Command.inqCameraZoomPos(this.index, (data) => { this.status.zoomPos = data }); this.sendCommand(v); }
 
-	getCameraFocusAutoStatus() { let v = Command.inqCameraFocusAutoStatus( this.index, ( data ) => { this.status.focusAutoStatus = data } ); this.sendCommand( v ); }
-	getCameraFocusAutoMode() { let v = Command.inqCameraFocusAutoMode( this.index, ( data ) => { this.status.focusAutoMode = data } ); this.sendCommand( v ); }
-	getCameraFocusIRCorrection() { let v = Command.inqCameraFocusIRCorrection( this.index, ( data ) => { this.status.focusIRCorrection = data } ); this.sendCommand( v ); }
-	getCameraFocusPos() { let v = Command.inqCameraFocusPos( this.index, ( data ) => { this.status.focusPos = data } ); this.sendCommand( v ); }
-	getCameraFocusNearLimit() { let v = Command.inqCameraFocusNearLimit( this.index, ( data ) => { this.status.focusNearLimit = data } ); this.sendCommand( v ); }
-	getCameraFocusAutoIntervalTime() { let v = Command.inqCameraFocusAutoIntervalTime( this.index, ( data ) => { this.status.focusAutoIntervalTime = data } ); this.sendCommand( v ); }
-	getCameraFocusSensitivity() { let v = Command.inqCameraFocusSensitivity( this.index, ( data ) => { this.status.autoFocusSensitivity = data } ); this.sendCommand( v ); }
+	getFocusAutoStatus() { let v = Command.inqCameraFocusAutoStatus(this.index, (data) => { this.status.autoFocusEnabled = data }); this.sendCommand(v); }
+	getFocusAutoMode() { let v = Command.inqCameraFocusAutoMode(this.index, (data) => { this.status.autoFocusMode = data }); this.sendCommand(v); }
+	getFocusIRCorrection() { let v = Command.inqCameraFocusIRCorrection(this.index, (data) => { this.status.focusIRCorrection = data }); this.sendCommand(v); }
+	getFocusPos() { let v = Command.inqCameraFocusPos(this.index, (data) => { this.status.focusPos = data }); this.sendCommand(v); }
+	getFocusNearLimit() { let v = Command.inqCameraFocusNearLimit(this.index, (data) => { this.status.focusNearLimit = data }); this.sendCommand(v); }
+	getFocusAutoIntervalTime() { let v = Command.inqCameraFocusAutoIntervalTime(this.index, (data) => { this.status.autoFocusIntervalTime = data }); this.sendCommand(v); }
+	getFocusSensitivity() { let v = Command.inqCameraFocusSensitivity(this.index, (data) => { this.status.autoFocusSensitivity = data }); this.sendCommand(v); }
 
-	getCameraWBMode() { let v = Command.inqCameraWBMode( this.index, ( data ) => { this.status.wbMode = data } ); this.sendCommand( v ); }
-	getCameraExposureMode() { let v = Command.inqCameraExposureMode( this.index, ( data ) => { this.status.exposureMode = data } ); this.sendCommand( v ); }
-	getCameraShutterSlowMode() { let v = Command.inqCameraShutterSlowMode( this.index, ( data ) => { this.status.shutterSlowMode = data } ); this.sendCommand( v ); }
-	getCameraShutter() { let v = Command.inqCameraShutterPos( this.index, ( data ) => { this.status.shutterPos = data } ); this.sendCommand( v ); }
-	getCameraIris() { let v = Command.inqCameraIris( this.index, ( data ) => { this.status.irisPos = data } ); this.sendCommand( v ); }
-	getCameraBrightness() { let v = Command.inqCameraBrightness( this.index, ( data ) => { this.status.brightness = data } ); this.sendCommand( v ); }
-	getCameraExposureCompensationStatus() { let v = Command.inqCameraExposureCompensationStatus( this.index, ( data ) => { this.status.exposureCompEnabled = data } ); this.sendCommand( v ); }
-	getCameraExposureCompensation() { let v = Command.inqCameraExposureCompensation( this.index, ( data ) => { this.status.exposureCompLevel = data } ); this.sendCommand( v ); }
-	getCameraBacklightStatus() { let v = Command.inqCameraBacklightStatus( this.index, ( data ) => { this.status.backlightCompEnabled = data } ); this.sendCommand( v ); }
+	getWBMode() { let v = Command.inqCameraWBMode(this.index, (data) => { this.status.wbMode = data }); this.sendCommand(v); }
+	getExposureMode() { let v = Command.inqCameraExposureMode(this.index, (data) => { this.status.exposureMode = data }); this.sendCommand(v); }
+	getShutterSlowMode() { let v = Command.inqCameraShutterSlowMode(this.index, (data) => { this.status.slowShutterAutoEnabled = data }); this.sendCommand(v); }
+	getShutter() { let v = Command.inqCameraShutterPos(this.index, (data) => { this.status.shutterPos = data }); this.sendCommand(v); }
+	getIris() { let v = Command.inqCameraIris(this.index, (data) => { this.status.irisPos = data }); this.sendCommand(v); }
+	getBrightness() { let v = Command.inqCameraBrightness(this.index, (data) => { this.status.brightness = data }); this.sendCommand(v); }
+	getExposureCompStatus() { let v = Command.inqCameraExposureCompStatus(this.index, (data) => { this.status.exposureCompEnabled = data }); this.sendCommand(v); }
+	getExposureCompPosition() { let v = Command.inqCameraExposureCompPosition(this.index, (data) => { this.status.exposureCompPosition = data }); this.sendCommand(v); }
+	getBacklightStatus() { let v = Command.inqCameraBacklightStatus(this.index, (data) => { this.status.backlightCompEnabled = data }); this.sendCommand(v); }
 
-	getCameraWideDStatus() { let v = Command.inqCameraWideDStatus( this.index, ( data ) => { this.status.wideDEnabled = data } ); this.sendCommand( v ); }
-	getCameraWideD() { let v = Command.inqCameraWideD( this.index, ( data ) => { this.status.wideDLevel = data } ); this.sendCommand( v ); }
+	getWideDStatus() { let v = Command.inqCameraWideDMode(this.index, (data) => { this.status.wideDMode = data; this.status.wideDEnabled = (data != 0); }); this.sendCommand(v); }
+	getWideDParams() { let v = Command.inqCameraWideDParams(this.index, (data) => { this.status.wideDParams = data }); this.sendCommand(v); }
 
-	getCameraAperture() { let v = Command.inqCameraAperture( this.index, ( data ) => { this.status.aperture = data } ); this.sendCommand( v ); }
-	getCameraHighResStatus() { let v = Command.inqCameraHighResStatus( this.index, ( data ) => { this.status.highResEnabled = data } ); this.sendCommand( v ); }
-	getCameraNoiseReductionStatus() { let v = Command.inqCameraNoiseReductionStatus( this.index, ( data ) => { this.status.noiseReductionEnabled = data } ); this.sendCommand( v ); }
-	getCameraHighSensitivityStatus() { let v = Command.inqCameraHighSensitivityStatus( this.index, ( data ) => { this.status.hightSensitivityEnabled = data } ); this.sendCommand( v ); }
-	getCameraFreezeStatus() { let v = Command.inqCameraFreezeStatus( this.index, ( data ) => { this.status.freeze = data } ); this.sendCommand( v ); }
-	getCameraEffect() { let v = Command.inqCameraEffect( this.index, ( data ) => { this.status.effect = data } ); this.sendCommand( v ); }
-	getCameraEffectDigital() { let v = Command.inqCameraEffectDigital( this.index, ( data ) => { this.status.digitalEffect = data } ); this.sendCommand( v ); }
-	getCameraEffectDigitalLevel() { let v = Command.inqCameraEffectDigitalLevel( this.index, ( data ) => { this.status.digitalEffectLevel = data } ); this.sendCommand( v ); }
+	getAperture() { let v = Command.inqCameraAperture(this.index, (data) => { this.status.apertureGain = data }); this.sendCommand(v); }
+	getHighResStatus() { let v = Command.inqCameraHighResStatus(this.index, (data) => { this.status.highResEnabled = data }); this.sendCommand(v); }
+	getNoiseReductionStatus() { let v = Command.inqCameraNoiseReductionStatus(this.index, (data) => { this.status.noiseReductionLevel = data }); this.sendCommand(v); }
+	getHighSensitivityStatus() { let v = Command.inqCameraHighSensitivityStatus(this.index, (data) => { this.status.highSensitivityEnabled = data }); this.sendCommand(v); }
+	getFreezeStatus() { let v = Command.inqCameraFreezeStatus(this.index, (data) => { this.status.frozen = data }); this.sendCommand(v); }
+	getEffect() { let v = Command.inqCameraEffect(this.index, (data) => { this.status.effect = data }); this.sendCommand(v); }
+	getEffectDigital() { let v = Command.inqCameraEffectDigital(this.index, (data) => { this.status.digitalEffect = data }); this.sendCommand(v); }
+	getEffectDigitalLevel() { let v = Command.inqCameraEffectDigitalLevel(this.index, (data) => { this.status.digitalEffectLevel = data }); this.sendCommand(v); }
 
-	getCameraID() { let v = Command.inqCameraID( this.index, ( data ) => { this.status.cameraID = data } ); this.sendCommand( v ); }
-	getCameraChromaSuppressStatus() { let v = Command.inqCameraChromaSuppressStatus( this.index, ( data ) => { this.status.chromaSuppresEnabled = data } ); this.sendCommand( v ); }
-	getCameraColorGain() { let v = Command.inqCameraColorGain( this.index, ( data ) => { this.status.colorGain = data } ); this.sendCommand( v ); }
-	getCameraColorHue() { let v = Command.inqCameraColorHue( this.index, ( data ) => { this.status.colorHue = data } ); this.sendCommand( v ); }
+	getID() { let v = Command.inqCameraID(this.index, (data) => { this.status.cameraID = data }); this.sendCommand(v); }
+	getChromaSuppressStatus() { let v = Command.inqCameraChromaSuppressStatus(this.index, (data) => { this.status.chromaSuppressLevel = data }); this.sendCommand(v); }
+	getColorGain() { let v = Command.inqCameraColorGain(this.index, (data) => { this.status.colorGain = data }); this.sendCommand(v); }
+	getColorHue() { let v = Command.inqCameraColorHue(this.index, (data) => { this.status.colorHue = data }); this.sendCommand(v); }
 
 	// these use op commands
-	getVideoSystemNow() { let v = Command.inqVideoSystemNow( this.index, ( data ) => { this.status.videoSystemNow = data } ); this.sendCommand( v ); }
-	getVideoSystemNext() { let v = Command.inqVideoSystemNext( this.index, ( data ) => { this.status.videoSystemPending = data } ); this.sendCommand( v ); }
+	getVideoFormatNow() { let v = Command.inqVideoFormatNow(this.index, (data) => { this.status.videoFormatNow = data }); this.sendCommand(v); }
+	getVideoFormatNext() { let v = Command.inqVideoFormatNext(this.index, (data) => { this.status.videoFormatNext = data }); this.sendCommand(v); }
 
-	getCameraPanPos() { let v = Command.inqCameraPanPos( this.index, ( data ) => { this.status.panPos = data; } ); this.sendCommand( v ); }
-	getCameraPanSpeed() { let v = Command.inqCameraPanSpeed( this.index, ( data ) => { this.status.panSpeed = data } ); this.sendCommand( v ); }
-	getCameraPanStatus() { let v = Command.inqCameraPanStatus( this.index, ( data ) => { this.status.updatePTStatus( data ) } ); this.sendCommand( v ); }
+	getPTPos() { let v = Command.inqCameraPanTiltPos(this.index, (data) => { this.status.ptPos = data; }); this.sendCommand(v); }
+	getPTSpeed() { let v = Command.inqCameraPanTiltSpeed(this.index, (data) => { this.status.ptSpeed = data }); this.sendCommand(v); }
+	getPTStatus() { let v = Command.inqCameraPanTiltStatus(this.index, (data) => { this.status.panTiltStatus = data }); this.sendCommand(v); }
 
 	// block inquiry commands
-	getCameraLens() { let v = Command.inqCameraLens( this.index, ( data ) => { this.status.updateLensData( data ); } ); this.sendCommand( v ); }
-	getCameraImage() { let v = Command.inqCameraImage( this.index, ( data ) => { this.status.updateImageData( data ); } ); this.sendCommand( v ); }
-}
-
-export class PTStatus {
-	initStatus: number;
-	initializing: boolean;
-	ready: boolean;
-	fail: boolean;
-
-	moveStatus: number;
-	moveDone: boolean;
-	moveFail: boolean;
-
-	atMaxL: boolean;
-	atMaxR: boolean;
-	atMaxU: boolean;
-	atMaxD: boolean;
-	moving: boolean;
-
-	constructor( data: number[] ) {
-		let [ p, q, r, s ] = utils.nibbles( data );
-
-		this.moveStatus = ( q & C.PAN_MOVE_FAIL ) >> 2;
-		this.initStatus = ( p & C.PAN_INIT_FAIL );
-
-		this.atMaxL = ( s & C.PAN_MAXL ) > 0;
-		this.atMaxR = ( s & C.PAN_MAXR ) > 0;
-		this.atMaxU = ( s & C.PAN_MAXU ) > 0;
-		this.atMaxD = ( s & C.PAN_MAXD ) > 0;
-
-		this.moving = this.moveStatus == 1;
-		this.moveDone = this.moveStatus == 2;
-		this.moveFail = this.moveStatus == 3;
-
-		this.initializing = this.initStatus == 1;
-		this.ready = this.initStatus == 2;
-		this.fail = this.initStatus == 3;
-	}
-}
-
-export class CamLensData {
-	zooming: boolean;
-	zoomPos: number;
-	digitalZoomEnabled: boolean;
-
-	focusing: boolean;
-	focusPos: number;
-	focusNearLimit: number;
-	autoFocusMode: number;
-	autoFocusSensitivity: number;
-	autoFocusEnabled: boolean;
-
-	lowContrast: boolean;
-	loadingPreset: boolean;
-
-	constructor( data: number[] ) {
-		this.zoomPos = utils.v2i( data.slice( 0, 4 ) );
-		this.focusNearLimit = utils.v2i( data.slice( 4, 6 ) );
-		this.focusPos = utils.v2i( data.slice( 6, 10 ) );
-
-		// no data is in byte 10
-		let ww = data[ 11 ];
-
-		// 0-normal, 1-interval, 2-trigger
-		this.autoFocusMode = ( ww & 0b11000 ) >> 3;
-
-		// 0-slow, 1-normal
-		this.autoFocusSensitivity = ( ww & 0b100 ) >> 2;
-
-		this.digitalZoomEnabled = utils.testBit( ww, 0b10 );
-		this.autoFocusEnabled = utils.testBit( ww, 0b1 );
-
-		let vv = data[ 12 ];
-		this.lowContrast = utils.testBit( vv, 0b1000 );
-		this.loadingPreset = utils.testBit( vv, 0b100 );
-		this.focusing = utils.testBit( vv, 0b10 );
-		this.zooming = utils.testBit( vv, 0b1 );
-	}
-}
-
-export class CamImageData {
-	gain: number;
-	gainr: number;
-	gainb: number;
-	wbMode: number;
-	exposureMode: number;
-	shutterPos: number;
-	irisPos: number;
-	gainPos: number;
-	brightness: number;
-	exposure: number;
-
-	highResEnabled: boolean;
-	wideDEnabled: boolean;
-	backlightCompEnabled: boolean;
-	exposureCompEnabled: boolean;
-	slowShutterAutoEnabled: boolean;
-
-	constructor( data: number[] ) {
-		this.gainr = utils.v2i( data.slice( 0, 2 ) )
-		this.gainb = utils.v2i( data.slice( 2, 4 ) )
-		this.wbMode = data[ 4 ];
-		this.gain = data[ 5 ];
-		this.exposureMode = data[ 6 ];
-		this.shutterPos = data[ 8 ];
-		this.irisPos = data[ 9 ];
-		this.gainPos = data[ 10 ];
-		this.brightness = data[ 11 ];
-		this.exposure = data[ 12 ];
-
-		let aa = data[ 7 ];
-		this.highResEnabled = utils.testBit( aa, 0b100000 );
-		this.wideDEnabled = utils.testBit( aa, 0b10000 );
-		this.backlightCompEnabled = utils.testBit( aa, 0b100 );
-		this.exposureCompEnabled = utils.testBit( aa, 0b10 );
-		this.slowShutterAutoEnabled = utils.testBit( aa, 0b1 );
-	}
+	getLensData() { let v = Command.inqCameraLens(this.index, (data) => { this.status.updateLensData(data); }); this.sendCommand(v); }
+	getImageData() { let v = Command.inqCameraImage(this.index, (data) => { this.status.updateImageData(data); }); this.sendCommand(v); }
 }

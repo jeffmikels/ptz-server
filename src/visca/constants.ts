@@ -1,9 +1,13 @@
 export class Constants {
+    static COMMAND_TIMEOUT = 200;
+
+    // == HEADER ==
     // masks for header components
     static HEADERMASK_SOURCE = 0b01110000;
     static HEADERMASK_RECIPIENT = 0b00000111;
     static HEADERMASK_BROADCAST = 0b00001000;
 
+    // == MESSAGE TYPE ==
     // controller message categories (QQ from the spec)
     static MSGTYPE_COMMAND = 0x01;
     static MSGTYPE_IF_CLEAR = 0x01;
@@ -17,47 +21,50 @@ export class Constants {
     static MSGTYPE_COMPLETE = 0x50;    // low nibble identifies the command buffer that completed
     static MSGTYPE_ERROR = 0x60;       // low nibble identifies the command buffer for the error
 
+    // == DATA TYPE ==
     // data types (RR from the spec)
     static DATATYPE_INTERFACE = 0x00;
     static DATATYPE_CAMERA = 0x04;
     static DATATYPE_OPERATION = 0x06;  // sometimes referred to as pan/tilt, but also does system
 
+    // == COMMAND TYPE CONSTANTS ==
     // camera settings codes                // data (pqrs is in i2v format)
-    static CAM_POWER = 0x00;                // (can inquire) 0x02, 0x03
-    static CAM_ICR = 0x01;                  // (can inquire) ON/OFF / infrared mode
-    static CAM_AUTO_ICR = 0x51;             // (can inquire) ON/OFF / Auto dark-field mode
+    static CAM_POWER = 0x00;                // (can inquire) ONVAL / OFFVAL
+    static CAM_SLEEP_TIME = 0x40;           // (not in the sony manual) 0p 0q 0r 0s
+    static CAM_ICR = 0x01;                  // (can inquire) ONVAL / OFFVAL / infrared mode
+    static CAM_AUTO_ICR = 0x51;             // (can inquire) ONVAL / OFFVAL / Auto dark-field mode
     static CAM_AUTO_ICR_THRESHOLD = 0x21;   // (can inquire) 00 00 0p 0q / threshold level
-    static CAM_GAIN = 0x0C;                 // 00, 02, 03 / reset, up, down
+    static CAM_GAIN = 0x0C;                 // (cmd only) 00, 02, 03 / reset, up, down // CMD_CAM_VAL_RESET, CMD_CAM_VAL_UP, CMD_CAM_VAL_DOWN
     static CAM_GAIN_LIMIT = 0x2C;           // (can inquire) 0p / range from 4-F
     static CAM_GAIN_DIRECT = 0x4C;          // (can inquire) 00 00 0p 0q / gain position
-    static CAM_RGAIN = 0x03;                // reset 00, up 02, down 03
+    static CAM_RGAIN = 0x03;                // (cmd only) same as gain command
     static CAM_RGAIN_DIRECT = 0X43;         // (can inquire) direct 00 00 0p 0q
-    static CAM_BGAIN = 0x04;                // reset 00, up 02, down 03
+    static CAM_BGAIN = 0x04;                // (cmd only) same as gain command
     static CAM_BGAIN_DIRECT = 0X44;         // (can inquire) direct 00 00 0p 0q
-    static CAM_ZOOM = 0x07;                 // 0x00 (stop), T/W 0x02, 0x03, 0x2p, 0x3p (variable)
-    static CAM_DZOOM = 0x06;                // (can inquire) 0x02, 0x03
+    static CAM_ZOOM = 0x07;                 // (cmd only) 0x00 (stop), T/W 0x02, 0x03, 0x2p, 0x3p (variable)
+    static CAM_DZOOM = 0x06;                // (can inquire) ONVAL / OFFVAL
     static CAM_ZOOM_DIRECT = 0x47;          // (can inquire) pqrs: zoom value, optional tuvw: focus value
     static CAM_FOCUS = 0x08;                // data settings just like zoom
-    static CAM_FOCUS_IR_CORRECTION = 0x11;  // (can inquire) 0x00, 0x01
-    static CAM_FOCUS_TRIGGER = 0x18;        // when followed by 0x01
-    static CAM_FOCUS_INFINITY = 0x18;       // when followed by 0x02
+    static CAM_FOCUS_IR_CORRECTION = 0x11;  // (can inquire) 0x00, 0x01 // basic boolean
+    static CAM_FOCUS_TRIGGER = 0x18;        // when followed by CMD_CAM_FOCUS_TRIGGER_NOW
+    static CAM_FOCUS_INFINITY = 0x18;       // when followed by CMD_CAM_FOCUS_TRIGGER_INF
     static CAM_FOCUS_NEAR_LIMIT_POS = 0x28; // (can inquire) pqrs (i2v)
-    static CAM_FOCUS_AUTO = 0x38;           // (can inquire) ON/OFF/TOGGLE / toggle means activate on trigger
+    static CAM_FOCUS_AUTO = 0x38;           // (can inquire) 0x02, 0x03, 0x10 | AUTO / MANUAL / AUTO+MANUAL (TOGGLE?)
     static CAM_FOCUS_DIRECT = 0x48;         // (can inquire) pqrs (i2v)
-    static CAM_FOCUS_AF_MODE = 0x57;        // (can inquire) 0x00, 0x01, 0x02 (on movement, interval, on zoom)
+    static CAM_FOCUS_AF_MODE = 0x57;        // (can inquire) 0x00, 0x01, 0x02 (normal (on movement), interval, on zoom)
     static CAM_FOCUS_AF_INTERVAL = 0x27;    // (can inquire) pq: Movement time, rs: Interval time
-    static CAM_FOCUS_SENSE_HIGH = 0x58;     // (can inquire) 0x02, 0x03
+    static CAM_FOCUS_SENSE_HIGH = 0x58;     // (can inquire) ONVAL / OFFVAL
     static CAM_WB_MODE = 0x35;              // (can inquire) 0-5 auto, indoor, outdoor, one-push, manual
     static CAM_WB_TRIGGER = 0x10;           // when followed by 0x05
     static CAM_EXPOSURE_MODE = 0x39;        // (can inquire) 00, 03, 0A, 0B, 0D / auto, manual, shutter, iris, bright
-    static CAM_SHUTTER_SLOW_AUTO = 0x5A;    // (can inquire) 0x02, 0x03 / auto, manual
-    static CAM_SHUTTER = 0x0A;              // 00, 02, 03 / reset, up, down
+    static CAM_SHUTTER_SLOW_AUTO = 0x5A;    // (can inquire) ONVAL / OFFVAL / auto, manual
+    static CAM_SHUTTER = 0x0A;              // 00, 02, 03 / same as gain
     static CAM_SHUTTER_DIRECT = 0x4A;       // (can inquire) 00 00 0p 0q
-    static CAM_IRIS = 0x0B;                 // 00, 02, 03 / reset, up, down
+    static CAM_IRIS = 0x0B;                 // CMD_CAM_VAL_RESET, CMD_CAM_VAL_UP, CMD_CAM_VAL_DOWN
     static CAM_IRIS_DIRECT = 0x4B;          // (can inquire) 00 00 0p 0q
-    static CAM_BRIGHT = 0x0D;               // 00, 02, 03 / reset, up, down
+    static CAM_BRIGHT = 0x0D;               // 00, 02, 03 / same as gain
     static CAM_BRIGHT_DIRECT = 0x4D;        // (can inquire) 00 00 0p 0q
-    static CAM_EXP_COMP = 0x0E;             // 00, 02, 03 / reset, up, down
+    static CAM_EXP_COMP = 0x0E;             // 00, 02, 03 / same as gain
     static CAM_EXP_COMP_ENABLE = 0x3E;      // (can inquire) ON/OFF
     static CAM_EXP_COMP_DIRECT = 0x4E;      // (can inquire) 00 00 0p 0q
     static CAM_BACKLIGHT = 0x33;            // (can inquire) ON/OFF
@@ -70,7 +77,7 @@ export class Constants {
     // s: Blown-out highlight correction level (0: L 1: M 2: H)
     // tu: Exposure ratio of short exposure (x1 to x64)
 
-    static CAM_APERTURE = 0x02;             // 00, 02, 03 / reset, up, down
+    static CAM_APERTURE = 0x02;             // 00, 02, 03 / like gain
     static CAM_APERTURE_DIRECT = 0x42;      // (can inquire) 00 00 0p 0q / aperture gain
 
     static CAM_HIRES_ENABLE = 0x52;         // (can inquire) ON/OFF
@@ -175,14 +182,66 @@ export class Constants {
     // FF: exposure
 
 
+    // == COMMAND ONLY CONSTANTS ==
+    // command constants (not available on inquiries)
+    static CMD_CAM_VAL_RESET = 0x00;
+    static CMD_CAM_VAL_CLEAR = 0x01;
+    static CMD_CAM_VAL_UP = 0x02;
+    static CMD_CAM_VAL_DOWN = 0x03;
+
+    static CMD_CAM_ZOOM_STOP = 0x00;
+    static CMD_CAM_ZOOM_TELE = 0x02;
+    static CMD_CAM_ZOOM_WIDE = 0x03;
+    static CMD_CAM_ZOOM_TELE_WITH_SPEED = 0x20;
+    static CMD_CAM_ZOOM_WIDE_WITH_SPEED = 0x30;
+
+    static CMD_CAM_FOCUS_STOP = 0x00;
+    static CMD_CAM_FOCUS_FAR = 0x02;
+    static CMD_CAM_FOCUS_NEAR = 0x03;
+    static CMD_CAM_FOCUS_FAR_WITH_SPEED = 0x20;
+    static CMD_CAM_FOCUS_NEAR_WITH_SPEED = 0x30;
+
+    static CMD_CAM_FOCUS_TRIGGER_NOW = 0x01;
+    static CMD_CAM_FOCUS_TRIGGER_INF = 0x02;
+
+    static CMD_CAM_WB_TRIGGER_NOW = 0x05;
+    
+
+    // == OTHER DATA CONSTANTS ==
     // data constants
+    static DATA_RESET = 0x00;
+    static DATA_MORE = 0x02;
+    static DATA_LESS = 0x03;
     static DATA_ONVAL = 0x02;
     static DATA_OFFVAL = 0x03;
-    static DATA_ZOOMIN = 0x02;
-    static DATA_ZOOMOUT = 0x03;
-    static DATA_FOCUSFAR = 0x02;
-    static DATA_FOCUSNEAR = 0x03;
     static DATA_TOGGLEVAL = 0x10;
+    static DATA_IR_CORRECTION_ENABLED = 0x01;
+
+    static DATA_CAM_FOCUS_MODE_AUTO = 0x02;
+    static DATA_CAM_FOCUS_MODE_MANUAL = 0x03;
+    static DATA_CAM_FOCUS_MODE_TOGGLE = 0x10;
+
+    static DATA_CAM_AUTOFOCUS_ON_MOVEMENT = 0x00;
+    static DATA_CAM_AUTOFOCUS_ON_INTERVAL = 0x01;
+    static DATA_CAM_AUTOFOCUS_ON_ZOOM = 0x02;
+
+    static DATA_CAM_WB_MODE_AUTO = 0x00;
+    static DATA_CAM_WB_MODE_INDOOR = 0x01;
+    static DATA_CAM_WB_MODE_OUTDOOR = 0x02;
+    static DATA_CAM_WB_MODE_ON_TRIGGER = 0x03;
+    static DATA_CAM_WB_MODE_MANUAL = 0x04;
+
+    static DATA_CAM_EXPOSURE_MODE_AUTO = 0x00;
+    static DATA_CAM_EXPOSURE_MODE_MANUAL = 0x03;
+    static DATA_CAM_EXPOSURE_MODE_SHUTTER = 0x0a;
+    static DATA_CAM_EXPOSURE_MODE_IRIS = 0x0b;
+    static DATA_CAM_EXPOSURE_MODE_BRIGHT = 0x0d;
+
+    static DATA_CAM_WIDE_DYN_AUTO = 0x00;
+    static DATA_CAM_WIDE_DYN_RATIO = 0x01;
+    static DATA_CAM_WIDE_DYN_ON = 0x02;
+    static DATA_CAM_WIDE_DYN_OFF = 0x03;
+    static DATA_CAM_WIDE_DYN_HIST = 0x04;
 
     // basic effects
     static DATA_EFFECT_OFF = 0x00;
@@ -233,7 +292,7 @@ export class Constants {
     static ERROR_COMMAND_FAILED = 0x41;
 
     // Zoom and Focus Settings
-    static FOCUS_NEAR_LIMIT_SONY_SETTINGS = [
+    static SONY_FOCUS_NEAR_LIMIT_SETTINGS = [
         0x1000,     //: Over Inf
         0x2000,     //: 25 m
         0x3000,     //: 11 m
@@ -251,7 +310,7 @@ export class Constants {
         0xF000,     //: 1 cm
     ];
 
-    static OPTICAL_ZOOM_PRESETS = [
+    static SONY_OPTICAL_ZOOM_PRESETS = [
         0x0000,
         0x16A1,
         0x2063,
@@ -284,7 +343,7 @@ export class Constants {
         0x4000,
     ];
 
-    static DIGITAL_ZOOM_PRESETS = [
+    static SONY_DIGITAL_ZOOM_PRESETS = [
         0x4000,
         0x6000,
         0x6A80,

@@ -14,10 +14,16 @@ to expose to network control.
 */
 export class ViscaServer extends EventEmitter implements ViscaTransport {
 
+	public uuid: string;
+	public socket: udp.Socket;
+
 	constructor( port = 50000 ) {
+		super();
+
+		this.uuid = uuid();
+
 		// creating a udp server
-		this.socket = udp.createSocket( 'udp4' );
-		let socket = this.socket;
+		let socket = udp.createSocket( 'udp4' );
 
 		// emits when any error occurs
 		socket.on( 'error', function ( error ) {
@@ -52,6 +58,7 @@ export class ViscaServer extends EventEmitter implements ViscaTransport {
 		} );
 
 		socket.bind( port );
+		this.socket = socket;
 	}
 
 	write( packet ) {
@@ -62,8 +69,8 @@ export class ViscaServer extends EventEmitter implements ViscaTransport {
 // simply implements a visca transport over a udp socket
 export class UDPTransport extends EventEmitter {
 	debug = false;
-
-	constructor( host = '', port = 50000 ) {
+	constructor( public host:string  = '', public port = 50000 ) {
+		super();
 		this.host = host;
 		this.port = port;
 		this.uuid = uuid();
