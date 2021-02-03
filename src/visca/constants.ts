@@ -1,3 +1,7 @@
+/*
+This file gives semantic names to all Visca constants
+*/
+
 export class Constants {
     static COMMAND_TIMEOUT = 200;
 

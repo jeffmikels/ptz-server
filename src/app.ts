@@ -1,7 +1,5 @@
 // MODULES
 import http, { IncomingMessage, ServerResponse } from 'http'
-
-import config from './config'
 import { ViscaController } from "./visca/controller"
 
 import SidewinderPP from "./controllers/sidewinderpp"
