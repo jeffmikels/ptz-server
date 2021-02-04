@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@utopian/visca": "0.0.12",
     "node-hid": "^2.1.1",
     "serialport": "^9.0.3",
     "uuid": "^8.3.2"

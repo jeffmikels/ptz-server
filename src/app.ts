@@ -1,9 +1,13 @@
 // MODULES
 import http, { IncomingMessage, ServerResponse } from 'http'
-import { ViscaController } from "./visca/controller"
+import { ViscaController, ViscaControllerConfig } from "@utopian/visca"
 
 import SidewinderPP from "./controllers/sidewinderpp"
 import Dualshock4 from "./controllers/dualshock4"
+import {config} from "./config";
+let {viscaSerial, viscaIPCameras, viscaServer} = config;
+
+let controllerConfig = config as ViscaControllerConfig;
 
 /* CONTROLLER HANDLER */
 let sw = new SidewinderPP(); // reports axes as signed values
@@ -13,7 +17,7 @@ let ds4 = new Dualshock4();      // reports axes as unsigned 8 bit
 ds4.onUpdate((data: Buffer) => console.log(data));
 
 // VISCA INTERFACE
-let vc = new ViscaController();
+let vc = new ViscaController({viscaSerial, viscaIPCameras, viscaServer});
 vc.startSerial('COM8', 38400);
 
 

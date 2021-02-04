@@ -1,10 +1,10 @@
 import fs from 'fs';
 
 let macros;
-if (fs.existsSync('macros.json')) {
+if ( fs.existsSync( 'macros.json' ) ) {
 	try {
-		macros = JSON.parse(fs.readFileSync('macros.json'));
-	} catch (e) {
+		macros = JSON.parse( fs.readFileSync( 'macros.json' ) );
+	} catch ( e ) {
 		macros = {}
 	}
 }
@@ -18,9 +18,7 @@ export let config = {
 
 	// configuration for visca-ip cameras
 	// {name, index, ip, port, [ptz | sony]}
-	viscaIPCameras: [
-
-	],
+	viscaIPCameras: [],
 
 	// configuration for the visca ip translation server
 	// the http server will reside at the basePort
